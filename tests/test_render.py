@@ -39,8 +39,18 @@ def test_repo_column_only_when_it_tells_you_something():
     assert "gadgets" in render(two)
 
 
-def test_ids_and_numbers_on_request():
-    envs = [Env.from_json(raw_env("abc-123", "sam/x"))]
-    text = render(envs, numbered=True, ids=True)
-    assert "abc-123" in text
+def test_numbers_on_request():
+    text = render([Env.from_json(raw_env("abc-123", "sam/x"))], numbered=True)
     assert text.splitlines()[1].lstrip().startswith("1")
+    assert "Created" not in text
+
+
+def test_twins_get_told_apart_by_id_and_creation():
+    twins = [
+        Env.from_json(raw_env("0000-aaaaaa", "sam/x", created="2026-09-28T10:00:00Z")),
+        Env.from_json(raw_env("0000-bbbbbb", "sam/x", created="2026-09-29T10:00:00Z")),
+    ]
+    text = render(twins)
+    assert "Created" in text
+    assert "aaaaaa" in text and "0000-" not in text
+    assert "Sep 28" in text and "Sep 29" in text

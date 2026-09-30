@@ -90,19 +90,23 @@ Wherever oo asks for a branch, you can give:
    `login-fix`
 3. The part after any other prefix, like `their-branch` for `sam/their-branch`
 4. Any part of a branch or environment name, like `login`
-5. The start of an ID
+5. The start or end of an ID
 
 oo tries these in order and stops at the first that matches anything, so `login` means
 `adam/login` even when `adam/login-fix` exists too. If a name still matches more than one
-environment, oo lists them and asks you to be more specific. The one exception is two environments
-on the same branch: `oo c` and `oo open` pick the running or most recently used one, while `oo rm`
-wants an ID.
+environment, oo lists them and asks which one you mean. In a script, with nobody to ask, it lists
+them and stops instead.
+
+When you have more than one environment on the same branch, lists also show when each was
+created and the last 6 characters of its ID. Type those characters to name one directly, like
+`oo c 0ffee1`.
 
 ### Reading the list
 
 | | |
 | --- | --- |
 | **Status** | `●` running · `◐` starting · `○` stopped. Running environments come first, then the rest by when you last used them. |
+| **ID**, **Created** | Only when two environments share a branch: the end of each one's ID, and when it was created. |
 | **Active** | When Ona last saw activity in the environment. |
 | **PR** | The newest pull request from the branch: draft, open, approved, changes req., merged or closed. The number links to it. |
 | **Changes** | Uncommitted files, and `unpushed` when the environment's latest commit isn't on GitHub. |

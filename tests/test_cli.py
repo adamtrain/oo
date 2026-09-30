@@ -159,12 +159,42 @@ def test_rm_deletes_without_asking(calls):
     assert calls == [("environment", "delete", "22222222-bbbb", "33333333-cccc", "--dont-wait")]
 
 
-def test_rm_wont_guess_between_twins(calls, envs):
-    envs[:] = [Env.from_json(raw_env(i, "sam/twin", "running")) for i in ("aa", "bb")]
+TWINS = [
+    raw_env("01a0-0000-aaaaaa", "sam/twin", "running", created="2026-09-28T10:00:00Z"),
+    raw_env("01a0-0000-bbbbbb", "sam/twin", created="2026-09-29T10:00:00Z"),
+]
+
+
+def test_twins_without_a_terminal_are_an_error_listing_them(calls, envs):
+    envs[:] = [Env.from_json(r) for r in TWINS]
     result = oo("rm", "twin")
     assert result.exit_code == 1
-    assert "Use its ID instead" in result.output
+    assert "Pass one of the IDs above instead" in result.output
+    assert "Created" in result.output
+    assert "aaaaaa" in result.output and "bbbbbb" in result.output
     assert calls == []
+
+
+@pytest.mark.parametrize("command", ["c", "rm", "stop"])
+def test_twins_get_asked_about(calls, monkeypatch, envs, command):
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    envs[:] = [Env.from_json(r) for r in TWINS]
+    result = oo(command, "twin", input="1\n")
+    assert '"twin" matches 2 environments' in result.output
+    assert "Which one?" in result.output
+    assert calls[0][2] == "01a0-0000-aaaaaa"
+
+
+def test_the_end_of_an_id_is_enough(calls, envs):
+    envs[:] = [Env.from_json(r) for r in TWINS]
+    oo("c", "bbbbbb")
+    assert calls == [("environment", "ssh", "01a0-0000-bbbbbb")]
+
+
+def test_vague_names_get_asked_about_too(calls, monkeypatch):
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    oo("c", "feat", input="2\n")
+    assert calls == [("environment", "ssh", "22222222-bbbb")]
 
 
 def test_new_reuses_your_latest_project_and_class_then_connects(calls):

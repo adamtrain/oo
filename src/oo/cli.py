@@ -68,10 +68,28 @@ def _github(envs: list[Env]) -> dict[str, BranchStatus] | None:
         _cancelled()
 
 
-def _find(envs: list[Env], query: str, *, strict: bool = False) -> Env:
+def _ask_which(envs: list[Env]) -> Env:
+    """Show `envs` numbered and have the person at the terminal pick one."""
+    err.print()
+    err.print(render.env_table(envs, branch_prefix(), width=err.width, numbered=True))
+    err.print()
+    try:
+        choice = IntPrompt.ask(
+            f"[{render.ACCENT}]Which one?[/] [dim](1-{len(envs)})[/]",
+            console=err,
+            choices=[str(i) for i in range(1, len(envs) + 1)],
+            show_choices=False,
+        )
+    except (KeyboardInterrupt, EOFError):
+        _cancelled()
+    return envs[choice - 1]
+
+
+def _find(envs: list[Env], query: str) -> Env:
+    """The environment `query` names, asking which one if it names several."""
     prefix = branch_prefix()
     try:
-        return pick(envs, query, prefix, strict=strict)
+        return pick(envs, query, prefix)
     except NoMatch:
         if not envs:
             _fail("You don't have any environments yet.", hint=NO_ENVS_HINT)
@@ -81,19 +99,21 @@ def _find(envs: list[Env], query: str, *, strict: bool = False) -> Env:
             hint = "Did you mean " + " or ".join(f"[bold]{name}[/]" for name in close) + "?"
         _fail(f'No environment matches "{query}".', hint=hint)
     except Ambiguous as e:
-        same_branch = len({c.branch for c in e.candidates}) == 1
-        render.error(err, f'"{query}" matches {len(e.candidates)} environments:')
+        message = f'"{query}" matches {len(e.candidates)} environments.'
+        if _interactive():
+            render.question(err, message)
+            return _ask_which(e.candidates)
+        render.error(err, message)
         err.print()
-        err.print(
-            render.env_table(e.candidates, prefix, width=err.width, ids=same_branch, details=False)
-        )
+        err.print(render.env_table(e.candidates, prefix, width=err.width))
         err.print()
-        err.print("  Use its ID instead." if same_branch else "  Be more specific.")
+        twins = len({c.branch for c in e.candidates}) < len(e.candidates)
+        err.print("  Pass one of the IDs above instead." if twins else "  Be more specific.")
         raise typer.Exit(1) from None
 
 
-def _find_all(envs: list[Env], queries: list[str], *, strict: bool = False) -> list[Env]:
-    found = [_find(envs, q, strict=strict) for q in queries]
+def _find_all(envs: list[Env], queries: list[str]) -> list[Env]:
+    found = [_find(envs, q) for q in queries]
     return list({env.id: env for env in found}.values())
 
 
@@ -110,19 +130,7 @@ def _choose(envs: list[Env], query: str | None, verb: str) -> Env:
         return running[0]
     if not _interactive():
         _fail(f"Which environment should I {verb}?", hint="Pass its branch name.")
-    err.print()
-    err.print(render.env_table(envs, branch_prefix(), width=err.width, numbered=True))
-    err.print()
-    try:
-        choice = IntPrompt.ask(
-            f"[{render.ACCENT}]Which one?[/] [dim](1-{len(envs)})[/]",
-            console=err,
-            choices=[str(i) for i in range(1, len(envs) + 1)],
-            show_choices=False,
-        )
-    except (KeyboardInterrupt, EOFError):
-        _cancelled()
-    return envs[choice - 1]
+    return _ask_which(envs)
 
 
 def _run(*args: str) -> None:
@@ -363,7 +371,7 @@ def stop(
 def remove(branches: Branches, wait: Wait = False) -> None:
     """Delete environments. Ona finishes the job in the background."""
     prefix = branch_prefix()
-    targets = _find_all(_load(), branches, strict=True)
+    targets = _find_all(_load(), branches)
     for env in targets:
         render.heading(err, "Deleting", env, prefix)
     _run("environment", "delete", *(e.id for e in targets), *([] if wait else ["--dont-wait"]))

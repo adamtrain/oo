@@ -10,6 +10,9 @@ from typing import Any
 
 PREFIX_VAR = "OO_BRANCH_PREFIX"
 
+# IDs are UUIDv7s, which share a timestamp up front, so the end is what tells them apart.
+SHORT_ID_LENGTH = 6
+
 # Most settled first, so the list shows what you're working on at the top.
 PHASE_ORDER = ["running", "starting", "creating", "updating", "stopping", "stopped"]
 
@@ -87,6 +90,10 @@ class Env:
         return self.phase == "running"
 
     @property
+    def short_id(self) -> str:
+        return self.id[-SHORT_ID_LENGTH:]
+
+    @property
     def repo(self) -> str:
         """Just the repository's name, e.g. `web`."""
         return self.repo_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
@@ -140,7 +147,7 @@ def matches(envs: list[Env], query: str, prefix: str) -> list[Env]:
         lambda e: e.branch in (q, prefix + q),
         lambda e: e.branch.endswith("/" + q),
         lambda e: lowered in e.branch.lower() or (e.name and lowered in e.name.lower()),
-        lambda e: e.id.startswith(lowered),
+        lambda e: e.id.startswith(lowered) or e.id.endswith(lowered),
     ]
     for tier in tiers:
         if hits := [e for e in envs if tier(e)]:
@@ -148,17 +155,11 @@ def matches(envs: list[Env], query: str, prefix: str) -> list[Env]:
     return []
 
 
-def pick(envs: list[Env], query: str, prefix: str, *, strict: bool = False) -> Env:
-    """The one environment `query` means.
-
-    Several environments on the same branch are settled by preferring a running one, then
-    the most recently used, unless `strict` (for anything destructive).
-    """
+def pick(envs: list[Env], query: str, prefix: str) -> Env:
+    """The one environment `query` means, or Ambiguous if it could be several."""
     hits = matches(envs, query, prefix)
     if not hits:
         raise NoMatch(query)
-    if len(hits) == 1:
-        return hits[0]
-    if strict or len({e.branch for e in hits}) > 1:
+    if len(hits) > 1:
         raise Ambiguous(query, sort_envs(hits))
-    return sort_envs(hits)[0]
+    return hits[0]

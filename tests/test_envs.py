@@ -79,6 +79,7 @@ def ids(envs: list[Env]) -> list[str]:
         ("DOCS", "", ["33"]),  # case-insensitive, name or branch
         ("Docs", "", ["33"]),  # exact name
         ("4444", "", ["44"]),  # ID prefix
+        ("-eeee", "", ["55"]),  # ID suffix
         ("11111111-aaaa", "", ["11"]),  # full ID
         ("nope", "", []),
         ("  ", "", []),
@@ -99,14 +100,15 @@ def test_pick_complains_when_nothing_matches():
         pick(ENVS, "nope", "sam/")
 
 
-def test_pick_prefers_running_on_a_shared_branch_unless_strict():
+def test_pick_wont_guess_between_environments_on_one_branch():
     twins = [
-        env("aa", "sam/twin", "stopped", active="2026-09-30T11:00:00Z"),
-        env("bb", "sam/twin", "running", active="2026-09-30T09:00:00Z"),
+        env("0000-aaaaaa", "sam/twin", "stopped", active="2026-09-30T11:00:00Z"),
+        env("0000-bbbbbb", "sam/twin", "running", active="2026-09-30T09:00:00Z"),
     ]
-    assert pick(twins, "twin", "sam/").id == "bb"
-    with pytest.raises(Ambiguous):
-        pick(twins, "twin", "sam/", strict=True)
+    with pytest.raises(Ambiguous) as e:
+        pick(twins, "twin", "sam/")
+    assert [c.short_id for c in e.value.candidates] == ["bbbbbb", "aaaaaa"]  # running first
+    assert pick(twins, "aaaaaa", "sam/").id == "0000-aaaaaa"
 
 
 def test_sort_puts_running_first_then_recent():
