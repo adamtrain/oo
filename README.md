@@ -1,0 +1,175 @@
+<h1 align="center">oo</h1>
+
+<p align="center">
+  <b>Hop into your <a href="https://ona.com">Ona</a> environments by branch name.</b><br>
+  No more copying UUIDs out of <code>ona environment list</code>: run <code>oo c login-fix</code> and you're in.
+</p>
+
+<p align="center">
+  <a href="https://github.com/adamtrain/oo/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/adamtrain/oo/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Python 3.13+" src="https://img.shields.io/badge/python-3.13%2B-3776ab?logo=python&logoColor=white">
+  <a href="https://github.com/astral-sh/uv"><img alt="uv" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"></a>
+  <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"></a>
+  <a href="LICENSE"><img alt="License: CC0-1.0" src="https://img.shields.io/badge/license-CC0--1.0-lightgrey"></a>
+</p>
+
+```console
+$ oo
+
+Branch               Status     Active   PR               Changes
+adam/login-fix       ● running  4m ago   #1234 open       unpushed
+adam/billing-export  ○ stopped  2d ago   #1198 approved   3 uncommitted
+adam/old-spike       ○ stopped  3w ago   #1102 merged
+
+$ oo c login
+→ Connecting to adam/login-fix · running
+```
+
+## Why oo
+
+- **Branches, not UUIDs.** Name an environment by its branch, any unique part of it, its name or
+  its ID. Leave your personal branch prefix off.
+- **One glance at everything.** The list shows what's running, when you last used each
+  environment, its pull request, and any work that isn't on GitHub yet.
+- **Knows what you mean.** `oo c` with no branch connects to the one running environment, or
+  lets you pick from a list. Typos get a "did you mean".
+- **A fresh environment in one command.** `oo new` creates an environment the way you did last
+  time and connects you to it.
+- **Doesn't make you wait.** Starting, stopping and deleting return straight away while Ona
+  carries on in the background.
+- **Just a wrapper.** Everything goes through the `ona` and `gh` CLIs you already have set up.
+  oo has no config file and stores nothing.
+
+## Install
+
+You'll need [uv](https://docs.astral.sh/uv/) and the [Ona CLI](https://ona.com/docs), logged in.
+The [GitHub CLI](https://cli.github.com) is optional; with it, the list shows each branch's pull
+request.
+
+```sh
+uv tool install git+https://github.com/adamtrain/oo
+```
+
+That puts `oo` on your `PATH`. To hack on it, clone the repo and install it in editable mode, so
+your changes take effect right away:
+
+```sh
+git clone https://github.com/adamtrain/oo && cd oo
+uv tool install --editable .
+```
+
+If your branches share a prefix, tell oo in your shell profile so you can leave it off:
+
+```sh
+export OO_BRANCH_PREFIX=adam/
+```
+
+For tab completion of branch names, run `oo --install-completion` once.
+
+## Usage
+
+```sh
+oo                            # list your environments
+oo c login-fix                # SSH into the one on adam/login-fix, starting it if needed
+oo c                          # …the only running one, or pick from a list
+oo c login -- git status      # run one command instead of opening a shell
+oo open login -e cursor       # open it in Cursor (or set $OO_EDITOR)
+oo new                        # create an environment and SSH into it
+oo start login billing        # warm some up in the background
+oo stop                       # stop the only running one (--all for every one)
+oo rm old-spike               # delete one
+ona env logs $(oo id login)   # hand an ID to any other ona command
+```
+
+### Naming an environment
+
+Wherever oo asks for a branch, you can give:
+
+1. An environment's ID or name
+2. The full branch, like `adam/login-fix`, or the branch without `$OO_BRANCH_PREFIX`, like
+   `login-fix`
+3. The part after any other prefix, like `their-branch` for `sam/their-branch`
+4. Any part of a branch or environment name, like `login`
+5. The start of an ID
+
+oo tries these in order and stops at the first that matches anything, so `login` means
+`adam/login` even when `adam/login-fix` exists too. If a name still matches more than one
+environment, oo lists them and asks you to be more specific. The one exception is two environments
+on the same branch: `oo c` and `oo open` pick the running or most recently used one, while `oo rm`
+wants an ID.
+
+### Reading the list
+
+| | |
+| --- | --- |
+| **Status** | `●` running · `◐` starting · `○` stopped. Running environments come first, then the rest by when you last used them. |
+| **Active** | When Ona last saw activity in the environment. |
+| **PR** | The newest pull request from the branch: draft, open, approved, changes req., merged or closed. The number links to it. |
+| **Changes** | Uncommitted files, and `unpushed` when the environment's latest commit isn't on GitHub. |
+
+Ona updates git details while an environment runs, so a stopped environment shows how things
+were when it stopped.
+
+### Creating environments
+
+`oo new` needs a project to create from and an environment class (a machine in a region) to run
+on. Each defaults to whatever your newest environment used, so it usually does what you did last
+time. To choose, use the options or set them in your shell profile:
+
+| | Option | Variable | Takes |
+| --- | --- | --- | --- |
+| **Project** | `-p, --project` | `OO_PROJECT` | An ID or name from `ona project list` |
+| **Class** | `-c, --class` | `OO_CLASS` | An ID from `ona environment list-classes`, or words that pick one out, like `frankfurt` or `tokyo m7i` |
+
+Class words prefer the classes the project offers, the same choices as Ona's region picker. Once
+Ona has started the environment, oo connects to it. It starts on the project's default branch.
+
+## Settings
+
+| Variable | |
+| --- | --- |
+| `OO_BRANCH_PREFIX` | Your branch prefix, e.g. `adam/`. Dimmed in the list and optional when typing. |
+| `OO_EDITOR` | Default editor for `oo open`: an alias from `ona environment list-editors`, like `cursor` |
+| `OO_PROJECT` | Default project for `oo new` |
+| `OO_CLASS` | Default environment class for `oo new` |
+
+## How it works
+
+oo reads your environments with `ona environment list --format json`, then passes the matching
+ID to `ona environment ssh`, `open`, `start`, `stop` or `delete`. `oo c` and `oo open` replace
+themselves with the ona process, so SSH gets your terminal to itself.
+
+Pull requests and push status come from a single GitHub GraphQL query per repository, made
+through `gh api`. It asks for each branch's newest pull request and whether each environment's
+latest commit exists on GitHub. If `gh` isn't installed, oo skips that column. If the query
+fails, oo says so and lists everything else.
+
+`oo new` notes which environments exist, runs `ona environment create`, and connects to the one
+that wasn't there before.
+
+## Development
+
+```sh
+uv sync                         # set up the environment
+uv run pytest                   # run the tests
+uv run ruff check . && uv run ruff format .
+uv run ty check                 # type-check
+```
+
+The tests fake both CLIs, so they run without Ona or GitHub.
+
+```
+src/oo/
+├── cli.py       # the commands
+├── envs.py      # environments, and finding one from what you typed
+├── projects.py  # choosing a project and environment class for `oo new`
+├── ona.py       # runs the ona CLI
+├── github.py    # asks GitHub about branches through gh
+└── render.py    # everything you see
+```
+
+## License
+
+[CC0 1.0](LICENSE). oo is dedicated to the public domain.
+
+oo is an independent project and isn't affiliated with or endorsed by Ona.

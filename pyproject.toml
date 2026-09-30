@@ -1,0 +1,54 @@
+[project]
+name = "oo"
+version = "0.1.0"
+description = "Hop into your Ona environments by branch name."
+readme = "README.md"
+license = "CC0-1.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Adam Train", email = "adam@adametrain.com" }
+]
+requires-python = ">=3.13"
+keywords = ["ona", "gitpod", "cli", "ssh", "dev-environments"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "rich>=15.0.0",
+    "typer>=0.27.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/adamtrain/oo"
+Repository = "https://github.com/adamtrain/oo"
+Issues = "https://github.com/adamtrain/oo/issues"
+
+[project.scripts]
+oo = "oo.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+    "ty>=0.0.83",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "C4", "PTH"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

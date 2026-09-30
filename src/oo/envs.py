@@ -1,0 +1,164 @@
+"""What an Ona environment looks like to us, and how to find one from a few typed characters."""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+PREFIX_VAR = "OO_BRANCH_PREFIX"
+
+# Most settled first, so the list shows what you're working on at the top.
+PHASE_ORDER = ["running", "starting", "creating", "updating", "stopping", "stopped"]
+
+
+def branch_prefix() -> str:
+    """Your branch prefix from $OO_BRANCH_PREFIX, with a trailing slash if you left it off."""
+    prefix = os.environ.get(PREFIX_VAR, "").strip()
+    if prefix and prefix[-1].isalnum():
+        prefix += "/"
+    return prefix
+
+
+def _dig(data: Any, *path: str | int) -> Any:
+    for key in path:
+        try:
+            data = data[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+    return data
+
+
+def _timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    # Ona can send nanoseconds, which fromisoformat won't take.
+    value = re.sub(r"(\.\d{6})\d+", r"\1", value)
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class Env:
+    id: str
+    name: str
+    branch: str
+    repo_url: str
+    phase: str
+    last_active: datetime | None
+    changes: tuple[str, ...] = ()
+    changed_count: int = 0
+    commit: str = ""
+    project_id: str = ""
+    class_id: str = ""
+    created: datetime | None = None
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> Env:
+        git = _dig(data, "status", "content", "git") or {}
+        # Before the content is cloned, only the spec knows what's coming.
+        initializer = _dig(data, "spec", "content", "initializer", "specs", 0, "git") or {}
+        changes = tuple(c.get("path", "") for c in git.get("changedFiles") or [])
+        phase = (_dig(data, "status", "phase") or "").removeprefix("ENVIRONMENT_PHASE_").lower()
+        created = _timestamp(_dig(data, "metadata", "createdAt"))
+        return cls(
+            id=data.get("id", ""),
+            name=_dig(data, "metadata", "name") or "",
+            branch=git.get("branch") or initializer.get("cloneTarget") or "",
+            repo_url=git.get("cloneUrl") or initializer.get("remoteUri") or "",
+            phase=phase if phase and phase != "unspecified" else "unknown",
+            last_active=_timestamp(_dig(data, "status", "activitySignal", "timestamp"))
+            or _timestamp(_dig(data, "metadata", "lastStartedAt"))
+            or created,
+            changes=changes,
+            changed_count=max(git.get("totalChangedFiles") or 0, len(changes)),
+            commit=git.get("latestCommit") or "",
+            project_id=_dig(data, "metadata", "projectId") or "",
+            class_id=_dig(data, "spec", "machine", "class") or "",
+            created=created,
+        )
+
+    @property
+    def running(self) -> bool:
+        return self.phase == "running"
+
+    @property
+    def repo(self) -> str:
+        """Just the repository's name, e.g. `web`."""
+        return self.repo_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+
+    def short_branch(self, prefix: str) -> str:
+        """What you'd type to mean this environment: its branch without your prefix."""
+        if not self.branch:
+            return self.name or self.id
+        if prefix and self.branch.startswith(prefix) and len(self.branch) > len(prefix):
+            return self.branch.removeprefix(prefix)
+        return self.branch
+
+
+def newest(envs: list[Env]) -> Env | None:
+    """The most recently created environment."""
+    dated = [e for e in envs if e.created]
+    return max(dated, key=lambda e: e.created) if dated else None
+
+
+def sort_envs(envs: list[Env]) -> list[Env]:
+    """Running first, then everything else by how recently it was used."""
+
+    def key(env: Env) -> tuple[int, float]:
+        rank = PHASE_ORDER.index(env.phase) if env.phase in PHASE_ORDER else len(PHASE_ORDER)
+        return rank, -(env.last_active.timestamp() if env.last_active else 0)
+
+    return sorted(envs, key=key)
+
+
+class NoMatch(Exception):
+    def __init__(self, query: str):
+        super().__init__(query)
+        self.query = query
+
+
+class Ambiguous(Exception):
+    def __init__(self, query: str, candidates: list[Env]):
+        super().__init__(query)
+        self.query = query
+        self.candidates = candidates
+
+
+def matches(envs: list[Env], query: str, prefix: str) -> list[Env]:
+    """Environments matching `query`, from the tightest kind of match that finds any."""
+    q = query.strip()
+    if not q:
+        return []
+    lowered = q.lower()
+    tiers = [
+        lambda e: q in (e.id, e.name),
+        lambda e: e.branch in (q, prefix + q),
+        lambda e: e.branch.endswith("/" + q),
+        lambda e: lowered in e.branch.lower() or (e.name and lowered in e.name.lower()),
+        lambda e: e.id.startswith(lowered),
+    ]
+    for tier in tiers:
+        if hits := [e for e in envs if tier(e)]:
+            return hits
+    return []
+
+
+def pick(envs: list[Env], query: str, prefix: str, *, strict: bool = False) -> Env:
+    """The one environment `query` means.
+
+    Several environments on the same branch are settled by preferring a running one, then
+    the most recently used, unless `strict` (for anything destructive).
+    """
+    hits = matches(envs, query, prefix)
+    if not hits:
+        raise NoMatch(query)
+    if len(hits) == 1:
+        return hits[0]
+    if strict or len({e.branch for e in hits}) > 1:
+        raise Ambiguous(query, sort_envs(hits))
+    return sort_envs(hits)[0]
