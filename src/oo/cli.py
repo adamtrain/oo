@@ -152,7 +152,10 @@ def _complete_branch(incomplete: str) -> list[tuple[str, str]]:
     return [(name, phase) for name, phase in names if name.startswith(incomplete)]
 
 
-BRANCH_HELP = "Branch (your prefix is optional), environment name or ID."
+BRANCH_HELP = (
+    f"Branch name, leaving off your ${PREFIX_VAR} if you set one. "
+    "Any unique part of it, an environment name or an ID works too."
+)
 Branch = Annotated[
     str, typer.Argument(help=BRANCH_HELP, autocompletion=_complete_branch, show_default=False)
 ]
@@ -179,16 +182,21 @@ def _version(value: bool) -> None:
 
 EPILOG = (
     "[bold]Examples[/]\n\n"
-    "  [cyan]oo[/]                             list your environments\n"
-    "  [cyan]oo c login-fix[/]                  SSH into the one on adam/login-fix\n"
-    "  [cyan]oo c[/]                           …the only running one, or pick from a list\n"
-    "  [cyan]oo c login -- git status[/]        run a command instead of a shell\n"
-    "  [cyan]oo open login -e cursor[/]         open it in Cursor\n"
-    "  [cyan]oo new[/]                         create an environment and connect to it\n"
-    "  [cyan]oo stop --all[/]                  stop everything that's running\n"
-    "  [cyan]ona env logs $(oo id login)[/]    hand an ID to any other ona command\n\n"
-    f"Set [bold]${PREFIX_VAR}[/] (e.g. [dim]adam/[/]) to leave your branch prefix off. "
-    "Branches can be shortened to any unique part."
+    "  [cyan]oo[/]                           list your environments\n"
+    "  [cyan]oo c login-fix[/]               SSH into the one on adam/login-fix\n"
+    "  [cyan]oo c[/]                         …the only running one, or pick from a list\n"
+    "  [cyan]oo c login -- git status[/]     run a command instead of a shell\n"
+    "  [cyan]oo open login -e cursor[/]      open it in Cursor\n"
+    "  [cyan]oo new[/]                       create an environment and connect to it\n"
+    "  [cyan]oo stop --all[/]                stop everything that's running\n"
+    "  [cyan]ona env logs $(oo id login)[/]  hand an ID to any other ona command\n\n"
+    "[bold]Branch prefix[/]\n\n"
+    "If you always start your branch names the same way, like [dim]adam/[/]login-fix, tell oo "
+    f"by setting [bold]${PREFIX_VAR}[/], ideally in your shell profile:\n\n"
+    f"  [cyan]export {PREFIX_VAR}=adam/[/]\n\n"
+    "Then you can leave the prefix off whenever you name a branch, as in [cyan]oo c login-fix[/], "
+    "and lists dim it so the part you'd type stands out. With or without a prefix, any unique "
+    "part of a branch name works too, like [cyan]oo c login[/]."
 )
 
 
