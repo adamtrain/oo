@@ -133,13 +133,33 @@ def _choose(envs: list[Env], query: str | None, verb: str) -> Env:
     return _ask_which(envs)
 
 
-def _run(*args: str) -> None:
+def _quietly(doing: str, *args: str, failed: str, cancelled: str = "") -> float:
+    """Run an ona command behind a spinner, showing its error nicely if it fails.
+
+    Returns how many seconds it took.
+    """
     try:
-        code = ona.run(*args)
+        with err.status(render.working(doing), spinner_style=render.ACCENT) as status:
+            return ona.quietly(
+                *args, failed=failed, on_tick=lambda s: status.update(render.working(doing, s))
+            )
+    except OnaError as e:
+        _fail(str(e), detail=e.detail, hint=e.hint)
     except KeyboardInterrupt:
+        if cancelled:
+            err.print(f"\n[dim]{cancelled}[/]")
         _cancelled()
-    if code:
-        raise typer.Exit(code)
+
+
+def _start_if_stopped(env: Env) -> str:
+    """Start `env` if it's stopped, so ona has nothing to say before connecting."""
+    if env.phase != "stopped":
+        return ""
+    label = render.names([env])
+    took = _quietly(
+        f"Starting {label}…", "environment", "start", env.id, failed=f"Ona couldn't start {label}."
+    )
+    return f"started in {render.duration(took)}"
 
 
 def _complete_branch(incomplete: str) -> list[tuple[str, str]]:
@@ -238,8 +258,7 @@ def connect(
 ) -> None:
     """SSH into an environment, starting it first if it's stopped."""
     env = _choose(_load(), branch, "connect to")
-    starting = "" if env.running else f"{env.phase}, so starting it first"
-    render.heading(err, "Connecting to", env, branch_prefix(), starting)
+    render.heading(err, "Connecting to", env, branch_prefix(), _start_if_stopped(env))
     ona.replace_with("environment", "ssh", env.id, *(["--", *command] if command else []))
 
 
@@ -260,7 +279,8 @@ def open_(
 ) -> None:
     """Open an environment in your editor, starting it first if it's stopped."""
     env = _choose(_load(), branch, "open")
-    render.heading(err, "Opening", env, branch_prefix(), f"in {editor}" if editor else "")
+    notes = [_start_if_stopped(env), f"in {editor}" if editor else ""]
+    render.heading(err, "Opening", env, branch_prefix(), ", ".join(n for n in notes if n))
     ona.replace_with(
         "environment", "open", env.id, "--start", *(["--editor", editor] if editor else [])
     )
@@ -313,11 +333,21 @@ def new(
 
     render.creating(err, chosen, where)
     before = {e.id for e in envs}
-    _run("environment", "create", chosen.id, *(["--class-id", where.id] if where else []))
+    took = _quietly(
+        "Waiting for Ona to set it up…",
+        "environment",
+        "create",
+        chosen.id,
+        *(["--class-id", where.id] if where else []),
+        failed="Ona couldn't create the environment.",
+        cancelled="Ona may still finish creating it. Run oo to check.",
+    )
     created = newest([e for e in _load() if e.id not in before])
     if created is None:
         _fail("Ona created it, but I can't find it to connect.", hint="Run [bold]oo[/] to look.")
-    render.heading(err, "Connecting to", created, branch_prefix())
+    render.heading(
+        err, "Connecting to", created, branch_prefix(), f"created in {render.duration(took)}"
+    )
     ona.replace_with("environment", "ssh", created.id)
 
 
@@ -330,13 +360,22 @@ def start(branches: Branches, wait: Wait = False) -> None:
         if env.phase in ACTIVE:
             render.heading(err, "Skipping", env, prefix, f"already {env.phase}")
         else:
-            render.heading(err, "Starting", env, prefix)
             targets.append(env)
     if not targets:
         return
-    _run("environment", "start", *(e.id for e in targets), *([] if wait else ["--dont-wait"]))
-    if not wait:
-        err.print("[dim]  They'll finish starting in the background. `oo c` waits if it has to.[/]")
+    label = render.names(targets)
+    took = _quietly(
+        f"Starting {label}…",
+        "environment",
+        "start",
+        *(e.id for e in targets),
+        *([] if wait else ["--dont-wait"]),
+        failed=f"Ona couldn't start {label}.",
+    )
+    if wait:
+        render.success(err, f"Started {label}", f"in {render.duration(took)}")
+    else:
+        render.success(err, f"Starting {label} in the background.", "oo c waits if it has to.")
 
 
 @app.command()
@@ -370,23 +409,38 @@ def stop(
     if not targets:
         render.success(err, "Nothing is running.")
         return
-    for env in targets:
-        render.heading(err, "Stopping", env, prefix)
-    _run("environment", "stop", *(e.id for e in targets), *([] if wait else ["--dont-wait"]))
+    label = render.names(targets)
+    took = _quietly(
+        f"Stopping {label}…",
+        "environment",
+        "stop",
+        *(e.id for e in targets),
+        *([] if wait else ["--dont-wait"]),
+        failed=f"Ona couldn't stop {label}.",
+    )
+    if wait:
+        render.success(err, f"Stopped {label}", f"in {render.duration(took)}")
+    else:
+        render.success(err, f"Stopping {label} in the background.")
 
 
 @app.command("rm")
 def remove(branches: Branches, wait: Wait = False) -> None:
     """Delete environments. Ona finishes the job in the background."""
-    prefix = branch_prefix()
     targets = _find_all(_load(), branches)
-    for env in targets:
-        render.heading(err, "Deleting", env, prefix)
-    _run("environment", "delete", *(e.id for e in targets), *([] if wait else ["--dont-wait"]))
+    label = render.names(targets)
+    took = _quietly(
+        f"Deleting {label}…",
+        "environment",
+        "delete",
+        *(e.id for e in targets),
+        *([] if wait else ["--dont-wait"]),
+        failed=f"Ona couldn't delete {label}.",
+    )
     if wait:
-        render.success(err, "Deleted.")
+        render.success(err, f"Deleted {label}", f"in {render.duration(took)}")
     else:
-        err.print("[dim]  Ona will finish deleting in the background.[/]")
+        render.success(err, f"Deleting {label} in the background.")
 
 
 @app.command("id")

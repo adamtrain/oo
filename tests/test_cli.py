@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from oo import cli, github, ona
 from oo.envs import Env
 from oo.github import BranchStatus, GitHubError, PullRequest
+from oo.ona import OnaError
 from oo.projects import EnvClass, Project
 
 RAW = [
@@ -37,17 +38,17 @@ def calls(monkeypatch, envs):
         record.append(args)
         raise Called
 
-    def run(*args):
+    def quietly(*args, failed, on_tick=None):
         record.append(args)
         if args[:2] == ("environment", "create"):
             envs.append(Env.from_json(raw_env("99999999-new", "main", "running")))
-        return 0
+        return 3.0
 
     monkeypatch.setattr(ona, "list_envs", lambda timeout=None: list(envs))
     monkeypatch.setattr(ona, "list_projects", lambda: [WIDGETS])
     monkeypatch.setattr(ona, "list_classes", lambda: [TOKYO, FRANKFURT])
     monkeypatch.setattr(ona, "replace_with", replace_with)
-    monkeypatch.setattr(ona, "run", run)
+    monkeypatch.setattr(ona, "quietly", quietly)
     monkeypatch.setattr(github, "lookup", lambda envs: {})
     monkeypatch.setenv("OO_BRANCH_PREFIX", "sam")
     return record
@@ -95,8 +96,29 @@ def test_connects_by_short_branch(calls):
 
 
 def test_passes_a_remote_command_through(calls):
-    oo("c", "docs", "--", "git", "status", "-sb")
-    assert calls == [("environment", "ssh", "33333333-cccc", "--", "git", "status", "-sb")]
+    oo("c", "feat-10", "--", "git", "status", "-sb")
+    assert calls == [("environment", "ssh", "11111111-aaaa", "--", "git", "status", "-sb")]
+
+
+def test_starts_a_stopped_one_quietly_before_connecting(calls):
+    result = oo("c", "docs")
+    assert "started in 3s" in result.output
+    assert calls == [
+        ("environment", "start", "33333333-cccc"),
+        ("environment", "ssh", "33333333-cccc"),
+    ]
+
+
+def test_ona_failures_get_shown_nicely(calls, monkeypatch):
+    def broken(*args, failed, on_tick=None):
+        raise OnaError(failed, detail="not_found: environment not found", hint="- try again")
+
+    monkeypatch.setattr(ona, "quietly", broken)
+    result = oo("rm", "docs")
+    assert result.exit_code == 1
+    assert "✗ Ona couldn't delete sam/docs." in result.output
+    assert "not_found: environment not found" in result.output
+    assert "- try again" in result.output
 
 
 def test_connect_with_no_branch_picks_the_only_running_one(calls):
@@ -109,7 +131,7 @@ def test_picks_from_a_list_when_its_not_obvious(calls, monkeypatch, envs):
     envs.pop(0)  # nothing running now
     result = oo("c", input="9\n2\n")
     assert "Which one?" in result.output
-    assert calls == [("environment", "ssh", "33333333-cccc")]
+    assert calls[-1] == ("environment", "ssh", "33333333-cccc")
 
 
 def test_ambiguous_branch_is_an_error(calls):
@@ -122,7 +144,7 @@ def test_ambiguous_branch_is_an_error(calls):
 def test_open_uses_the_editor_from_the_environment(calls, monkeypatch):
     monkeypatch.setenv("OO_EDITOR", "cursor")
     oo("open", "docs")
-    assert calls == [("environment", "open", "33333333-cccc", "--start", "--editor", "cursor")]
+    assert calls[-1] == ("environment", "open", "33333333-cccc", "--start", "--editor", "cursor")
 
 
 def test_id_prints_just_the_id(calls):
@@ -156,6 +178,7 @@ def test_stop_with_several_running_asks_for_names(calls, envs):
 def test_rm_deletes_without_asking(calls):
     result = oo("rm", "feat-10-2", "docs")
     assert result.exit_code == 0
+    assert "Deleting sam/feat-10-2 and sam/docs in the background." in result.output
     assert calls == [("environment", "delete", "22222222-bbbb", "33333333-cccc", "--dont-wait")]
 
 
@@ -188,13 +211,13 @@ def test_twins_get_asked_about(calls, monkeypatch, envs, command):
 def test_the_end_of_an_id_is_enough(calls, envs):
     envs[:] = [Env.from_json(r) for r in TWINS]
     oo("c", "bbbbbb")
-    assert calls == [("environment", "ssh", "01a0-0000-bbbbbb")]
+    assert calls[-1] == ("environment", "ssh", "01a0-0000-bbbbbb")
 
 
 def test_vague_names_get_asked_about_too(calls, monkeypatch):
     monkeypatch.setattr(cli, "_interactive", lambda: True)
     oo("c", "feat", input="2\n")
-    assert calls == [("environment", "ssh", "22222222-bbbb")]
+    assert calls[-1] == ("environment", "ssh", "22222222-bbbb")
 
 
 def test_new_reuses_your_latest_project_and_class_then_connects(calls):
@@ -219,3 +242,8 @@ def test_new_complains_about_unknown_classes(calls):
     assert result.exit_code == 1
     assert "m7i.xlarge in Tokyo, m7i.xlarge in Frankfurt" in result.output
     assert calls == []
+
+
+def test_start_and_stop_say_what_they_did(calls):
+    assert "Starting sam/docs in the background." in oo("start", "docs").output
+    assert "Stopped sam/feat-10 in 3s" in oo("stop", "feat-10", "--wait").output

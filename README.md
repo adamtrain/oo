@@ -37,6 +37,8 @@ $ oo c login
   time and connects you to it.
 - **Doesn't make you wait.** Starting, stopping and deleting return straight away while Ona
   carries on in the background.
+- **Quiet.** ona's own output stays behind a spinner with a timer. If something goes wrong, you
+  see ona's error and any fixes it suggests.
 - **Just a wrapper.** Everything goes through the `ona` and `gh` CLIs you already have set up.
   oo has no config file and stores nothing.
 
@@ -140,8 +142,10 @@ Ona has started the environment, oo connects to it. It starts on the project's d
 ## How it works
 
 oo reads your environments with `ona environment list --format json`, then passes the matching
-ID to `ona environment ssh`, `open`, `start`, `stop` or `delete`. `oo c` and `oo open` replace
-themselves with the ona process, so SSH gets your terminal to itself.
+ID to `ona environment ssh`, `open`, `start`, `stop` or `delete`. It runs these with their output
+hidden behind a spinner, and if one fails, it shows the `Error:` and "Possible resolutions" ona
+printed. `oo c` and `oo open` start a stopped environment that way first, then replace themselves
+with the ona process, so SSH gets your terminal to itself.
 
 Pull requests and push status come from a single GitHub GraphQL query per repository, made
 through `gh api`. It asks for each branch's newest pull request and whether each environment's

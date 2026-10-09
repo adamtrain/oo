@@ -182,12 +182,30 @@ def warning(console: Console, message: str, detail: str | None = None) -> None:
         console.print(Text(f"  {detail}", style=FAINT))
 
 
-def working(message: str) -> Text:
-    return Text(message, style=ACCENT)
+def duration(seconds: float) -> str:
+    seconds = round(seconds)
+    return f"{seconds}s" if seconds < 60 else f"{seconds // 60}m {seconds % 60:02d}s"
 
 
-def success(console: Console, message: str) -> None:
-    console.print(Text.assemble(("✓ ", f"bold {GREEN}"), message))
+def names(envs: list[Env]) -> str:
+    """e.g. `adam/a`, `adam/a and adam/b`, `adam/a, adam/b and adam/c`"""
+    named = [e.branch or e.name or e.id for e in envs]
+    return named[0] if len(named) == 1 else ", ".join(named[:-1]) + f" and {named[-1]}"
+
+
+def working(message: str, elapsed: float | None = None) -> Text:
+    """Spinner text, with how long it's been going once that's worth saying."""
+    text = Text(message, style=ACCENT)
+    if elapsed and elapsed >= 1:
+        text.append(f" · {duration(elapsed)}", style=FAINT)
+    return text
+
+
+def success(console: Console, message: str, note: str = "") -> None:
+    line = Text.assemble(("✓ ", f"bold {GREEN}"), message)
+    if note:
+        line.append(f" {note}", style=FAINT)
+    console.print(line)
 
 
 def error(console: Console, message: str, *, detail: str | None = None, hint: str | None = None):

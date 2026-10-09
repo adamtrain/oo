@@ -49,6 +49,15 @@ def test_falls_back_to_the_spec_before_cloning():
     assert (e.branch, e.repo, e.phase, e.last_active) == ("sam/new", "y", "creating", None)
 
 
+def test_shows_deleting_and_stopping_as_soon_as_theyre_asked_for():
+    assert env("abc", "sam/x", "running", desired="deleted").phase == "deleting"
+    assert env("abc", "sam/x", "stopped", desired="deleted").phase == "deleting"
+    assert env("abc", "sam/x", "deleted", desired="deleted").phase == "deleted"
+    assert env("abc", "sam/x", "running", desired="stopped").phase == "stopping"
+    assert env("abc", "sam/x", "starting", desired="stopped").phase == "stopping"
+    assert env("abc", "sam/x", "stopped", desired="stopped").phase == "stopped"
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [("", ""), ("sam", "sam/"), ("sam/", "sam/"), (" sam ", "sam/"), ("sam-", "sam-")],

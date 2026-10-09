@@ -18,6 +18,7 @@ def raw_env(
     name: str | None = None,
     project: str = "p-1",
     env_class: str = "c-fr",
+    desired: str = "running",
 ) -> dict[str, Any]:
     """Just enough of `ona environment list --format json` to be realistic."""
     git: dict[str, Any] = {"branch": branch, "cloneUrl": repo, "latestCommit": commit}
@@ -27,7 +28,10 @@ def raw_env(
     return {
         "id": id,
         "metadata": {"name": name, "createdAt": created, "projectId": project},
-        "spec": {"desiredPhase": "ENVIRONMENT_PHASE_RUNNING", "machine": {"class": env_class}},
+        "spec": {
+            "desiredPhase": f"ENVIRONMENT_PHASE_{desired.upper()}",
+            "machine": {"class": env_class},
+        },
         "status": {
             "phase": f"ENVIRONMENT_PHASE_{phase.upper()}",
             "activitySignal": {"timestamp": active},

@@ -67,6 +67,12 @@ class Env:
         initializer = _dig(data, "spec", "content", "initializer", "specs", 0, "git") or {}
         changes = tuple(c.get("path", "") for c in git.get("changedFiles") or [])
         phase = (_dig(data, "status", "phase") or "").removeprefix("ENVIRONMENT_PHASE_").lower()
+        # Ona marks a stop or deletion in the spec straight away, but the phase lags behind.
+        desired = (_dig(data, "spec", "desiredPhase") or "").removeprefix("ENVIRONMENT_PHASE_")
+        if desired == "DELETED" and phase != "deleted":
+            phase = "deleting"
+        elif desired == "STOPPED" and phase in ("running", "starting", "creating", "updating"):
+            phase = "stopping"
         created = _timestamp(_dig(data, "metadata", "createdAt"))
         return cls(
             id=data.get("id", ""),
