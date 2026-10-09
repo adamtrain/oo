@@ -315,3 +315,26 @@ def test_cp_refuses_what_it_cant_do(calls, args):
     result = oo("cp", *args)
     assert result.exit_code == 1
     assert calls == []
+
+
+def test_rm_wait_sees_a_delete_through_when_ona_gives_up_at_the_stop(calls, monkeypatch, envs):
+    def stops(*args, failed, on_tick=None):
+        calls.append(args)
+        envs.pop(0)
+        raise OnaError(failed, detail="environment has unexpectedly stopped")
+
+    monkeypatch.setattr(ona, "quietly", stops)
+    result = oo("rm", "feat-10", "--wait")
+    assert result.exit_code == 0
+    assert "Deleted sam/feat-10" in result.output
+    assert calls == [("environment", "delete", "11111111-aaaa")]
+
+
+def test_rm_wait_still_fails_on_real_errors(calls, monkeypatch):
+    def broken(*args, failed, on_tick=None):
+        raise OnaError(failed, detail="permission denied")
+
+    monkeypatch.setattr(ona, "quietly", broken)
+    result = oo("rm", "feat-10", "--wait")
+    assert result.exit_code == 1
+    assert "permission denied" in result.output

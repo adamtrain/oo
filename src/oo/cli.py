@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, NoReturn
 
@@ -133,17 +134,20 @@ def _choose(envs: list[Env], query: str | None, verb: str) -> Env:
     return _ask_which(envs)
 
 
-def _quietly(doing: str, *args: str, failed: str, cancelled: str = "") -> float:
+def _quietly(doing: str, *args: str, failed: str, cancelled: str = "", harmless: str = "") -> float:
     """Run an ona command behind a spinner, showing its error nicely if it fails.
 
-    Returns how many seconds it took.
+    Returns how many seconds it took. An error mentioning `harmless` doesn't count as failing.
     """
+    started = time.monotonic()
     try:
         with err.status(render.working(doing), spinner_style=render.ACCENT) as status:
             return ona.quietly(
                 *args, failed=failed, on_tick=lambda s: status.update(render.working(doing, s))
             )
     except OnaError as e:
+        if harmless and harmless in (e.detail or ""):
+            return time.monotonic() - started
         _fail(str(e), detail=e.detail, hint=e.hint)
     except KeyboardInterrupt:
         if cancelled:
@@ -481,20 +485,44 @@ def stop(
         render.success(err, f"Stopping {label} in the background.")
 
 
+def _until_gone(envs: list[Env], doing: str, elapsed: float) -> float:
+    """Wait for `envs` to leave the list, carrying on the timer from `elapsed` seconds in.
+
+    Returns how many seconds it took altogether.
+    """
+    ids = {e.id for e in envs}
+    started = time.monotonic() - elapsed
+    try:
+        with err.status(render.working(doing, elapsed), spinner_style=render.ACCENT) as status:
+            while ids & {e.id for e in ona.list_envs() if e.phase != "deleted"}:
+                time.sleep(2)
+                status.update(render.working(doing, time.monotonic() - started))
+    except OnaError as e:
+        _fail(str(e), detail=e.detail, hint=e.hint)
+    except KeyboardInterrupt:
+        err.print("\n[dim]Ona will still finish deleting. Run oo to check.[/]")
+        _cancelled()
+    return time.monotonic() - started
+
+
 @app.command("rm")
 def remove(branches: Branches, wait: Wait = False) -> None:
     """Delete environments. Ona finishes the job in the background."""
     targets = _find_all(_load(), branches)
     label = render.names(targets)
+    doing = f"Deleting {label}…"
     took = _quietly(
-        f"Deleting {label}…",
+        doing,
         "environment",
         "delete",
         *(e.id for e in targets),
         *([] if wait else ["--dont-wait"]),
         failed=f"Ona couldn't delete {label}.",
+        # Deleting stops a running environment first, and ona's waiting takes that as failure.
+        harmless="unexpectedly stopped" if wait else "",
     )
     if wait:
+        took = _until_gone(targets, doing, took)
         render.success(err, f"Deleted {label}", f"in {render.duration(took)}")
     else:
         render.success(err, f"Deleting {label} in the background.")
