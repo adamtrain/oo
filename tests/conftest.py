@@ -19,6 +19,7 @@ def raw_env(
     project: str = "p-1",
     env_class: str = "c-fr",
     desired: str = "running",
+    checkout: str = "/workspaces/widgets",
 ) -> dict[str, Any]:
     """Just enough of `ona environment list --format json` to be realistic."""
     git: dict[str, Any] = {"branch": branch, "cloneUrl": repo, "latestCommit": commit}
@@ -35,7 +36,7 @@ def raw_env(
         "status": {
             "phase": f"ENVIRONMENT_PHASE_{phase.upper()}",
             "activitySignal": {"timestamp": active},
-            "content": {"git": git},
+            "content": {"git": git, "contentLocationInMachine": checkout},
         },
     }
 

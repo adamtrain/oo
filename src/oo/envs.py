@@ -59,6 +59,7 @@ class Env:
     project_id: str = ""
     class_id: str = ""
     created: datetime | None = None
+    checkout: str = ""
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> Env:
@@ -74,6 +75,9 @@ class Env:
         elif desired == "STOPPED" and phase in ("running", "starting", "creating", "updating"):
             phase = "stopping"
         created = _timestamp(_dig(data, "metadata", "createdAt"))
+        checkout = _dig(data, "status", "content", "contentLocationInMachine") or ""
+        if not checkout and initializer.get("checkoutLocation"):
+            checkout = f"/workspaces/{initializer['checkoutLocation']}"
         return cls(
             id=data.get("id", ""),
             name=_dig(data, "metadata", "name") or "",
@@ -89,6 +93,7 @@ class Env:
             project_id=_dig(data, "metadata", "projectId") or "",
             class_id=_dig(data, "spec", "machine", "class") or "",
             created=created,
+            checkout=checkout,
         )
 
     @property

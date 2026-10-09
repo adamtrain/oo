@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.prompt import IntPrompt
 
-from . import __version__, github, ona, render
+from . import __version__, github, ona, render, ssh
 from .envs import PREFIX_VAR, Ambiguous, Env, NoMatch, branch_prefix, newest, pick, sort_envs
 from .github import BranchStatus, GitHubError, NoGh
 from .ona import OnaError
@@ -207,6 +207,8 @@ EPILOG = (
     "  [cyan]oo c[/]                         …the only running one, or pick from a list\n"
     "  [cyan]oo c login -- git status[/]     run a command instead of a shell\n"
     "  [cyan]oo open login -e cursor[/]      open it in Cursor\n"
+    "  [cyan]oo cp notes.md login:[/]        copy a file into its repo\n"
+    "  [cyan]oo cp login:out.csv .[/]        …or out of it\n"
     "  [cyan]oo new[/]                       create an environment and connect to it\n"
     "  [cyan]oo stop --all[/]                stop everything that's running\n"
     "  [cyan]ona env logs $(oo id login)[/]  hand an ID to any other ona command\n\n"
@@ -284,6 +286,61 @@ def open_(
     ona.replace_with(
         "environment", "open", env.id, "--start", *(["--editor", editor] if editor else [])
     )
+
+
+def _set_up_ssh(env: Env) -> None:
+    """Have ona teach ssh about its environments, if it hasn't yet, and say so."""
+    try:
+        if ssh.configured(env.id):
+            return
+        _quietly("Setting up SSH…", "environment", "ssh-config", failed="Ona couldn't set up SSH.")
+        if not ssh.configured(env.id):
+            _fail(
+                "Ona set up SSH, but ssh still can't reach the environment.",
+                hint="Check what [bold]ona environment ssh-config[/] added to ~/.ssh/config.",
+            )
+    except ssh.SshError as e:
+        _fail(str(e), hint=e.hint)
+    render.success(err, "Set up SSH for Ona environments", "with ona environment ssh-config")
+
+
+@app.command("cp")
+def copy(
+    paths: Annotated[
+        list[str],
+        typer.Argument(
+            help="Where to copy from, then where to. Write paths in an environment as "
+            "[bold]branch:path[/], or [bold]:path[/] for the only running one. Relative ones "
+            "start in the repo.",
+            show_default=False,
+        ),
+    ],
+) -> None:
+    """Copy files and folders between here and an environment, like scp."""
+    example = "Like [bold]oo cp notes.md login:[/] or [bold]oo cp login:out.csv .[/]"
+    if len(paths) < 2:
+        _fail("Copy what, and where to?", hint=example)
+    spots = [ssh.Spot.parse(p) for p in paths]
+    *sources, dest = spots
+    remotes = [s for s in spots if s.remote]
+    if not remotes:
+        _fail("None of those are in an environment.", hint=example)
+    if any(s.remote == dest.remote for s in sources):
+        _fail("oo cp copies between here and an environment, one way at a time.", hint=example)
+
+    verb = "copy to" if dest.remote else "copy from"
+    envs = _load()
+    chosen = {branch: _choose(envs, branch or None, verb) for branch in {s.branch for s in remotes}}
+    if len({e.id for e in chosen.values()}) > 1:
+        _fail("Those are in more than one environment.", hint="Copy from one at a time.")
+    env = next(iter(chosen.values()))
+    _set_up_ssh(env)
+    note = _start_if_stopped(env)
+    render.heading(err, "Copying to" if dest.remote else "Copying from", env, branch_prefix(), note)
+    where = ssh.host(env.id)
+    args = [f"{where}:{s.resolved(env.checkout)}" if s.remote else s.path for s in spots]
+    # -O: Ona's SFTP server writes files as root, so they'd be stuck read-only in your shell.
+    ssh.replace_with_scp("-O", "-r", "--", *args)
 
 
 @app.command()

@@ -76,6 +76,8 @@ oo c login-fix                # SSH into the one on adam/login-fix, starting it 
 oo c                          # …the only running one, or pick from a list
 oo c login -- git status      # run one command instead of opening a shell
 oo open login -e cursor       # open it in Cursor (or set $OO_EDITOR)
+oo cp notes.md dist login:    # copy files and folders into the repo on adam/login-fix
+oo cp login:out/report.csv .  # …or out of it
 oo new                        # create an environment and SSH into it
 oo start login billing        # warm some up in the background
 oo stop                       # stop the only running one (--all for every one)
@@ -102,6 +104,24 @@ them and stops instead.
 When you have more than one environment on the same branch, lists also show when each was
 created and the last 6 characters of its ID. Type those characters to name one directly, like
 `oo c 0ffee1`.
+
+### Copying files
+
+`oo cp` works like `scp`, with a branch where the host would go. The last path is where to copy
+to, and paths in an environment are written `branch:path`:
+
+```sh
+oo cp notes.md login:              # into the repo's top folder
+oo cp notes.md login:docs/         # into a folder in the repo
+oo cp login:out/report.csv .       # out of the repo, into this folder
+oo cp a.py dist/ login:tmp/        # several files and folders at once
+oo cp :out.csv .                   # the only running environment, or pick from a list
+```
+
+Relative paths in an environment start in the repo, where `oo c` puts you, rather than in the
+home folder. `~/` and `/` work as usual, and so do wildcards like `login:logs/*.log`. Folders copy without needing `-r`. A path starting with
+`./`, `/` or `~` is always on your machine, so `./odd:name` names a local file with a colon in it.
+Copies go one way at a time, between your machine and one environment.
 
 ### Reading the list
 
@@ -152,6 +172,11 @@ through `gh api`. It asks for each branch's newest pull request and whether each
 latest commit exists on GitHub. If `gh` isn't installed, oo skips that column. If the query
 fails, oo says so and lists everything else.
 
+`oo cp` hands the copy to `scp`, using the `<id>.ona.environment` host names that
+`ona environment ssh-config` sets up. It uses scp's original protocol (`-O`) rather than SFTP,
+because Ona's SFTP server would leave the files owned by root. If ssh doesn't know those names yet, oo runs
+`ona environment ssh-config` once and tells you it did.
+
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
 that wasn't there before.
 
@@ -173,6 +198,7 @@ src/oo/
 ├── projects.py  # choosing a project and environment class for `oo new`
 ├── ona.py       # runs the ona CLI
 ├── github.py    # asks GitHub about branches through gh
+├── ssh.py       # copies files with scp, for `oo cp`
 └── render.py    # everything you see
 ```
 

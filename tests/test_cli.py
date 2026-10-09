@@ -4,7 +4,7 @@ import pytest
 from conftest import raw_env
 from typer.testing import CliRunner
 
-from oo import cli, github, ona
+from oo import cli, github, ona, ssh
 from oo.envs import Env
 from oo.github import BranchStatus, GitHubError, PullRequest
 from oo.ona import OnaError
@@ -50,6 +50,8 @@ def calls(monkeypatch, envs):
     monkeypatch.setattr(ona, "replace_with", replace_with)
     monkeypatch.setattr(ona, "quietly", quietly)
     monkeypatch.setattr(github, "lookup", lambda envs: {})
+    monkeypatch.setattr(ssh, "configured", lambda env_id: True)
+    monkeypatch.setattr(ssh, "replace_with_scp", lambda *args: replace_with("scp", *args))
     monkeypatch.setenv("OO_BRANCH_PREFIX", "sam")
     return record
 
@@ -247,3 +249,69 @@ def test_new_complains_about_unknown_classes(calls):
 def test_start_and_stop_say_what_they_did(calls):
     assert "Starting sam/docs in the background." in oo("start", "docs").output
     assert "Stopped sam/feat-10 in 3s" in oo("stop", "feat-10", "--wait").output
+
+
+def test_cp_copies_into_the_repo(calls):
+    result = oo("cp", "notes.md", "dist", "feat-10:")
+    assert "Copying to sam/feat-10" in result.output
+    assert calls == [
+        (
+            "scp",
+            "-O",
+            "-r",
+            "--",
+            "notes.md",
+            "dist",
+            "11111111-aaaa.ona.environment:/workspaces/widgets",
+        )
+    ]
+
+
+def test_cp_copies_out_starting_stopped_ones(calls):
+    result = oo("cp", "docs:out/a.csv", "docs:/tmp/b.csv", ".")
+    assert "Copying from sam/docs · started in 3s" in result.output
+    host = "33333333-cccc.ona.environment"
+    assert calls == [
+        ("environment", "start", "33333333-cccc"),
+        (
+            "scp",
+            "-O",
+            "-r",
+            "--",
+            f"{host}:/workspaces/widgets/out/a.csv",
+            f"{host}:/tmp/b.csv",
+            ".",
+        ),
+    ]
+
+
+def test_cp_with_no_branch_uses_the_only_running_one(calls):
+    oo("cp", ":~/.bashrc", "./odd:name")
+    assert calls == [
+        ("scp", "-O", "-r", "--", "11111111-aaaa.ona.environment:~/.bashrc", "./odd:name")
+    ]
+
+
+def test_cp_sets_up_ssh_the_first_time(calls, monkeypatch):
+    answers = iter([False, True])
+    monkeypatch.setattr(ssh, "configured", lambda env_id: next(answers))
+    result = oo("cp", "notes.md", "feat-10:")
+    assert "Set up SSH for Ona environments" in result.output
+    assert calls[0] == ("environment", "ssh-config")
+    assert calls[1][0] == "scp"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["notes.md"],
+        ["notes.md", "elsewhere.md"],
+        ["feat-10:a", "docs:"],
+        ["feat-10:a", "local.md", "."],
+        ["feat-10:a", "docs:b", "."],
+    ],
+)
+def test_cp_refuses_what_it_cant_do(calls, args):
+    result = oo("cp", *args)
+    assert result.exit_code == 1
+    assert calls == []
