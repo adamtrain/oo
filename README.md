@@ -31,8 +31,8 @@ $ oo c login
   its ID. Leave your personal branch prefix off.
 - **One glance at everything.** The list shows what's running, when you last used each
   environment, its pull request, and any work that isn't on GitHub yet.
-- **Knows what you mean.** `oo c` with no branch connects to the one running environment, or
-  lets you pick from a list. Typos get a "did you mean".
+- **Knows what you mean.** `oo c`, `oo open` and `oo claude` with no branch use the one running
+  environment, or let you pick from a list. Typos get a "did you mean".
 - **A fresh environment in one command.** `oo new` creates an environment the way you did last
   time and connects you to it.
 - **Doesn't make you wait.** Starting, stopping and deleting return straight away while Ona
@@ -76,6 +76,7 @@ oo c login-fix                # SSH into the one on adam/login-fix, starting it 
 oo c                          # …the only running one, or pick from a list
 oo c login -- git status      # run one command instead of opening a shell
 oo open login -e cursor       # open it in Cursor (or set $OO_EDITOR)
+oo claude login               # open a Claude Code session on it in the Claude desktop app
 oo cp notes.md dist login:    # copy files and folders into the repo on adam/login-fix
 oo cp login:out/report.csv .  # …or out of it
 oo new                        # create an environment and SSH into it
@@ -177,6 +178,10 @@ fails, oo says so and lists everything else.
 because Ona's SFTP server would leave the files owned by root. If ssh doesn't know those names yet, oo runs
 `ona environment ssh-config` once and tells you it did.
 
+`oo claude` sets up SSH the same way, then opens a `claude://code/new?ssh_host=…&ssh_folder=…`
+link. That starts a new Claude Code session in the [Claude desktop app](https://claude.ai/download),
+connected over SSH to the environment and starting in its repo.
+
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
 that wasn't there before.
 
@@ -199,6 +204,7 @@ src/oo/
 ├── ona.py       # runs the ona CLI
 ├── github.py    # asks GitHub about branches through gh
 ├── ssh.py       # copies files with scp, for `oo cp`
+├── claude.py    # hands an environment to the Claude desktop app, for `oo claude`
 └── render.py    # everything you see
 ```
 

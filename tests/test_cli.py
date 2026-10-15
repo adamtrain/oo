@@ -4,7 +4,7 @@ import pytest
 from conftest import raw_env
 from typer.testing import CliRunner
 
-from oo import cli, github, ona, ssh
+from oo import claude, cli, github, ona, ssh
 from oo.envs import Env
 from oo.github import BranchStatus, GitHubError, PullRequest
 from oo.ona import OnaError
@@ -52,6 +52,8 @@ def calls(monkeypatch, envs):
     monkeypatch.setattr(github, "lookup", lambda envs: {})
     monkeypatch.setattr(ssh, "configured", lambda env_id: True)
     monkeypatch.setattr(ssh, "replace_with_scp", lambda *args: replace_with("scp", *args))
+    monkeypatch.setattr(claude, "check_installed", lambda: None)
+    monkeypatch.setattr(claude, "open_link", lambda url: record.append(("open", url)))
     monkeypatch.setenv("OO_BRANCH_PREFIX", "sam")
     return record
 
@@ -147,6 +149,44 @@ def test_open_uses_the_editor_from_the_environment(calls, monkeypatch):
     monkeypatch.setenv("OO_EDITOR", "cursor")
     oo("open", "docs")
     assert calls[-1] == ("environment", "open", "33333333-cccc", "--start", "--editor", "cursor")
+
+
+def test_claude_opens_the_only_running_one_in_the_desktop_app(calls):
+    result = oo("claude")
+    assert result.exit_code == 0
+    link = "claude://code/new?ssh_host=11111111-aaaa.ona.environment&ssh_folder=%2Fworkspaces%2Fwidgets"
+    assert calls == [("open", link)]
+
+
+def test_claude_starts_a_stopped_one_and_sets_up_ssh_first(calls, monkeypatch):
+    answers = iter([False, True])
+    monkeypatch.setattr(ssh, "configured", lambda env_id: next(answers))
+    result = oo("claude", "docs")
+    assert "Set up SSH for Ona environments" in result.output
+    assert calls[0] == ("environment", "ssh-config")
+    assert calls[1] == ("environment", "start", "33333333-cccc")
+    assert calls[2][1].startswith("claude://code/new?ssh_host=33333333-cccc.ona.environment")
+
+
+def test_claude_says_when_the_app_wont_open(calls, monkeypatch):
+    def broken(url):
+        raise claude.ClaudeError("Couldn't open the Claude desktop app.")
+
+    monkeypatch.setattr(claude, "open_link", broken)
+    result = oo("claude", "docs")
+    assert result.exit_code == 1
+    assert "Couldn't open the Claude desktop app." in result.output
+
+
+def test_claude_checks_for_the_app_before_touching_the_environment(calls, monkeypatch):
+    def missing():
+        raise claude.ClaudeError("The Claude desktop app isn't installed.")
+
+    monkeypatch.setattr(claude, "check_installed", missing)
+    result = oo("claude", "docs")
+    assert result.exit_code == 1
+    assert "The Claude desktop app isn't installed." in result.output
+    assert calls == []
 
 
 def test_id_prints_just_the_id(calls):
