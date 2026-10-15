@@ -316,14 +316,26 @@ def claude_(branch: MaybeBranch = None) -> None:
         claude.check_installed()
     except claude.ClaudeError as e:
         _fail(str(e), hint=e.hint)
-    env = _choose(_load(), branch, "open in Claude")
+    envs = _load()
+    env = _choose(envs, branch, "open in Claude")
     _set_up_ssh(env)
     note = _start_if_stopped(env)
+    host = _claude_host(env, envs)
     render.heading(err, "Opening in Claude", env, branch_prefix(), note)
     try:
-        claude.open_link(claude.link(env.id, env.checkout))
+        claude.open_link(claude.link(env.id, env.checkout, host=host))
     except claude.ClaudeError as e:
         _fail(str(e), hint=e.hint)
+
+
+def _claude_host(env: Env, envs: list[Env]) -> str:
+    """The SSH host for the Claude app: the environment's own sshd if it works, else Ona's."""
+    try:
+        with err.status(render.working("Setting up SSH for Claude…"), spinner_style=render.ACCENT):
+            return claude.set_up_host(env.id, {e.id for e in envs})
+    except claude.ClaudeError as e:
+        render.warning(err, f"{e} Opening with Ona's own SSH host instead.", detail=e.hint)
+        return ssh.host(env.id)
 
 
 @app.command("cp")

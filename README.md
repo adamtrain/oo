@@ -40,7 +40,9 @@ $ oo c login
 - **Quiet.** ona's own output stays behind a spinner with a timer. If something goes wrong, you
   see ona's error and any fixes it suggests.
 - **Just a wrapper.** Everything goes through the `ona` and `gh` CLIs you already have set up.
-  oo has no config file and stores nothing.
+  oo has no config file of its own. The one exception is `oo claude`, which writes SSH host
+  entries; see [docs/claude-desktop.md](docs/claude-desktop.md) for what it changes and how to
+  undo it.
 
 ## Install
 
@@ -180,7 +182,10 @@ because Ona's SFTP server would leave the files owned by root. If ssh doesn't kn
 
 `oo claude` sets up SSH the same way, then opens a `claude://code/new?ssh_host=…&ssh_folder=…`
 link. That starts a new Claude Code session in the [Claude desktop app](https://claude.ai/download),
-connected over SSH to the environment and starting in its repo.
+connected over SSH to the environment and starting in its repo. The app can't install its helper
+over Ona's SFTP server, so `oo claude` sets up a second SSH host for each environment, with its own
+key. [docs/claude-desktop.md](docs/claude-desktop.md) explains why, the security trade-offs, and how
+to clean up.
 
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
 that wasn't there before.
@@ -206,6 +211,8 @@ src/oo/
 ├── ssh.py       # copies files with scp, for `oo cp`
 ├── claude.py    # hands an environment to the Claude desktop app, for `oo claude`
 └── render.py    # everything you see
+docs/
+└── claude-desktop.md  # why `oo claude` needs its SSH workaround, and how to undo it
 ```
 
 ## License

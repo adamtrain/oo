@@ -49,7 +49,7 @@ class Spot:
         return posixpath.join(checkout, self.path) if self.path else checkout
 
 
-def _binary(name: str) -> str:
+def binary(name: str) -> str:
     path = shutil.which(name)
     if not path:
         raise SshError(f"Couldn't find {name}.", hint=f"Make sure [bold]{name}[/] is on your PATH.")
@@ -59,7 +59,7 @@ def _binary(name: str) -> str:
 def configured(env_id: str) -> bool:
     """Whether ssh knows how to reach the environment, from `ona environment ssh-config`."""
     name = host(env_id)
-    done = subprocess.run([_binary("ssh"), "-G", name], capture_output=True, text=True)
+    done = subprocess.run([binary("ssh"), "-G", name], capture_output=True, text=True)
     if done.returncode:
         return False
     settings = dict(line.partition(" ")[::2] for line in done.stdout.splitlines())
@@ -73,7 +73,7 @@ def configured(env_id: str) -> bool:
 
 def replace_with_scp(*args: str) -> NoReturn:
     """Become scp, so it can show its progress and ask for anything it needs."""
-    binary = _binary("scp")
+    scp = binary("scp")
     sys.stdout.flush()
     sys.stderr.flush()
-    os.execv(binary, [binary, *args])
+    os.execv(scp, [scp, *args])

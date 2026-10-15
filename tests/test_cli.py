@@ -53,6 +53,7 @@ def calls(monkeypatch, envs):
     monkeypatch.setattr(ssh, "configured", lambda env_id: True)
     monkeypatch.setattr(ssh, "replace_with_scp", lambda *args: replace_with("scp", *args))
     monkeypatch.setattr(claude, "check_installed", lambda: None)
+    monkeypatch.setattr(claude, "set_up_host", lambda env_id, live_ids: ssh.host(env_id))
     monkeypatch.setattr(claude, "open_link", lambda url: record.append(("open", url)))
     monkeypatch.setenv("OO_BRANCH_PREFIX", "sam")
     return record
@@ -156,6 +157,26 @@ def test_claude_opens_the_only_running_one_in_the_desktop_app(calls):
     assert result.exit_code == 0
     link = "claude://code/new?ssh_host=11111111-aaaa.ona.environment&ssh_folder=%2Fworkspaces%2Fwidgets"
     assert calls == [("open", link)]
+
+
+def test_claude_uses_the_environments_own_sshd_when_it_can(calls, monkeypatch):
+    monkeypatch.setattr(claude, "set_up_host", lambda env_id, live_ids: f"{env_id}.claude.oo")
+    result = oo("claude")
+    assert result.exit_code == 0
+    link = "claude://code/new?ssh_host=11111111-aaaa.claude.oo&ssh_folder=%2Fworkspaces%2Fwidgets"
+    assert calls == [("open", link)]
+
+
+def test_claude_falls_back_to_onas_host_and_says_why(calls, monkeypatch):
+    def unavailable(env_id, live_ids):
+        raise claude.ClaudeError("Nothing is listening on port 2222 in the environment.")
+
+    monkeypatch.setattr(claude, "set_up_host", unavailable)
+    result = oo("claude")
+    assert result.exit_code == 0
+    assert "Nothing is listening on port 2222" in result.output
+    assert "Opening with Ona's own" in result.output
+    assert calls[0][1].startswith("claude://code/new?ssh_host=11111111-aaaa.ona.environment")
 
 
 def test_claude_starts_a_stopped_one_and_sets_up_ssh_first(calls, monkeypatch):
