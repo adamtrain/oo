@@ -12,7 +12,7 @@ import typer
 from rich.console import Console
 from rich.prompt import IntPrompt
 
-from . import __version__, github, ona, render, ssh
+from . import __version__, claude, github, ona, render, ssh
 from .envs import PREFIX_VAR, Ambiguous, Env, NoMatch, branch_prefix, newest, pick, sort_envs
 from .github import BranchStatus, GitHubError, NoGh
 from .ona import OnaError
@@ -211,6 +211,7 @@ EPILOG = (
     "  [cyan]oo c[/]                         …the only running one, or pick from a list\n"
     "  [cyan]oo c login -- git status[/]     run a command instead of a shell\n"
     "  [cyan]oo open login -e cursor[/]      open it in Cursor\n"
+    "  [cyan]oo claude login[/]              open it in the Claude desktop app\n"
     "  [cyan]oo cp notes.md login:[/]        copy a file into its repo\n"
     "  [cyan]oo cp login:out.csv .[/]        …or out of it\n"
     "  [cyan]oo new[/]                       create an environment and connect to it\n"
@@ -306,6 +307,23 @@ def _set_up_ssh(env: Env) -> None:
     except ssh.SshError as e:
         _fail(str(e), hint=e.hint)
     render.success(err, "Set up SSH for Ona environments", "with ona environment ssh-config")
+
+
+@app.command("claude")
+def claude_(branch: MaybeBranch = None) -> None:
+    """Open a Claude Code session on an environment in the Claude desktop app, over SSH."""
+    try:
+        claude.check_installed()
+    except claude.ClaudeError as e:
+        _fail(str(e), hint=e.hint)
+    env = _choose(_load(), branch, "open in Claude")
+    _set_up_ssh(env)
+    note = _start_if_stopped(env)
+    render.heading(err, "Opening in Claude", env, branch_prefix(), note)
+    try:
+        claude.open_link(claude.link(env.id, env.checkout))
+    except claude.ClaudeError as e:
+        _fail(str(e), hint=e.hint)
 
 
 @app.command("cp")
