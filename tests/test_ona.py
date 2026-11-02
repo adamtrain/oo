@@ -53,7 +53,9 @@ def fake_ona(monkeypatch, tmp_path):
 
 def test_quietly_keeps_ona_quiet(fake_ona, capfd):
     fake_ona('echo "Starting environment…"; echo "noise" >&2')
-    assert ona.quietly("environment", "start", "x", failed="nope") >= 0
+    took, output = ona.quietly("environment", "start", "x", failed="nope")
+    assert took >= 0
+    assert "Starting environment…" in output and "noise" in output
     assert capfd.readouterr() == ("", "")
 
 

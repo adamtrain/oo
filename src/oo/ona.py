@@ -85,11 +85,13 @@ def list_classes() -> list[EnvClass]:
     return [EnvClass.from_json(item) for item in items if item.get("enabled", True)]
 
 
-def quietly(*args: str, failed: str, on_tick: Callable[[float], None] | None = None) -> float:
+def quietly(
+    *args: str, failed: str, on_tick: Callable[[float], None] | None = None
+) -> tuple[float, str]:
     """Run an ona command without letting it print, calling `on_tick` about once a second.
 
-    Returns how many seconds it took. If it fails, raises an OnaError saying `failed`, with
-    whatever ona said about why.
+    Returns how many seconds it took and what it would have printed. If it fails, raises an
+    OnaError saying `failed`, with whatever ona said about why.
     """
     started = time.monotonic()
     process = subprocess.Popen(
@@ -113,7 +115,7 @@ def quietly(*args: str, failed: str, on_tick: Callable[[float], None] | None = N
         raise
     if process.returncode:
         raise error_from(failed, output or "")
-    return time.monotonic() - started
+    return time.monotonic() - started, output or ""
 
 
 def replace_with(*args: str) -> NoReturn:

@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.prompt import IntPrompt
 
 from . import __version__, claude, github, ona, render, ssh
-from .envs import PREFIX_VAR, Ambiguous, Env, NoMatch, branch_prefix, newest, pick, sort_envs
+from .envs import PREFIX_VAR, Ambiguous, Env, NoMatch, branch_prefix, pick, sort_envs
 from .github import BranchStatus, GitHubError, NoGh
 from .ona import OnaError
 from .projects import CLASS_VAR, PROJECT_VAR, ChoiceError, pick_class, pick_project
@@ -134,10 +134,13 @@ def _choose(envs: list[Env], query: str | None, verb: str) -> Env:
     return _ask_which(envs)
 
 
-def _quietly(doing: str, *args: str, failed: str, cancelled: str = "", harmless: str = "") -> float:
+def _quietly(
+    doing: str, *args: str, failed: str, cancelled: str = "", harmless: str = ""
+) -> tuple[float, str]:
     """Run an ona command behind a spinner, showing its error nicely if it fails.
 
-    Returns how many seconds it took. An error mentioning `harmless` doesn't count as failing.
+    Returns how many seconds it took and what ona printed. An error mentioning `harmless`
+    doesn't count as failing.
     """
     started = time.monotonic()
     try:
@@ -147,7 +150,7 @@ def _quietly(doing: str, *args: str, failed: str, cancelled: str = "", harmless:
             )
     except OnaError as e:
         if harmless and harmless in (e.detail or ""):
-            return time.monotonic() - started
+            return time.monotonic() - started, e.detail or ""
         _fail(str(e), detail=e.detail, hint=e.hint)
     except KeyboardInterrupt:
         if cancelled:
@@ -160,7 +163,7 @@ def _start_if_stopped(env: Env) -> str:
     if env.phase != "stopped":
         return ""
     label = render.names([env])
-    took = _quietly(
+    took, _ = _quietly(
         f"Starting {label}…", "environment", "start", env.id, failed=f"Ona couldn't start {label}."
     )
     return f"started in {render.duration(took)}"
@@ -424,7 +427,7 @@ def new(
 
     render.creating(err, chosen, where)
     before = {e.id for e in envs}
-    took = _quietly(
+    took, output = _quietly(
         "Waiting for Ona to set it up…",
         "environment",
         "create",
@@ -433,9 +436,15 @@ def new(
         failed="Ona couldn't create the environment.",
         cancelled="Ona may still finish creating it. Run oo to check.",
     )
-    created = newest([e for e in _load() if e.id not in before])
+    fresh = [e for e in _load() if e.id not in before]
+    # Another oo new running alongside makes more than one new environment, so go by the ID
+    # ona printed, and only by there being just the one new environment if it didn't print one.
+    created = next((e for e in fresh if e.id in output), fresh[0] if len(fresh) == 1 else None)
     if created is None:
-        _fail("Ona created it, but I can't find it to connect.", hint="Run [bold]oo[/] to look.")
+        _fail(
+            "Ona created it, but I can't tell which environment is yours to connect.",
+            hint="Run [bold]oo[/] to look.",
+        )
     render.heading(
         err, "Connecting to", created, branch_prefix(), f"created in {render.duration(took)}"
     )
@@ -455,7 +464,7 @@ def start(branches: Branches, wait: Wait = False) -> None:
     if not targets:
         return
     label = render.names(targets)
-    took = _quietly(
+    took, _ = _quietly(
         f"Starting {label}…",
         "environment",
         "start",
@@ -501,7 +510,7 @@ def stop(
         render.success(err, "Nothing is running.")
         return
     label = render.names(targets)
-    took = _quietly(
+    took, _ = _quietly(
         f"Stopping {label}…",
         "environment",
         "stop",
@@ -541,7 +550,7 @@ def remove(branches: Branches, wait: Wait = False) -> None:
     targets = _find_all(_load(), branches)
     label = render.names(targets)
     doing = f"Deleting {label}…"
-    took = _quietly(
+    took, _ = _quietly(
         doing,
         "environment",
         "delete",

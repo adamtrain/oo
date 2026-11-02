@@ -42,7 +42,8 @@ def calls(monkeypatch, envs):
         record.append(args)
         if args[:2] == ("environment", "create"):
             envs.append(Env.from_json(raw_env("99999999-new", "main", "running")))
-        return 3.0
+            return 3.0, "99999999-new\n"
+        return 3.0, ""
 
     monkeypatch.setattr(ona, "list_envs", lambda timeout=None: list(envs))
     monkeypatch.setattr(ona, "list_projects", lambda: [WIDGETS])
@@ -291,6 +292,35 @@ def test_new_reuses_your_latest_project_and_class_then_connects(calls):
         ("environment", "create", "p-1", "--class-id", "c-fr"),
         ("environment", "ssh", "99999999-new"),
     ]
+
+
+def made_alongside_another(envs, printed: str):
+    """A fake create, during which an `oo new` in another terminal makes a newer environment."""
+
+    def quietly(*args, failed, on_tick=None):
+        envs.append(Env.from_json(raw_env("99999999-new", "main", created="2026-10-01T00:00:00Z")))
+        envs.append(
+            Env.from_json(raw_env("88888888-rival", "main", created="2026-10-02T00:00:00Z"))
+        )
+        return 3.0, printed
+
+    return quietly
+
+
+def test_new_connects_to_its_own_environment_when_another_is_made_alongside(
+    calls, monkeypatch, envs
+):
+    monkeypatch.setattr(ona, "quietly", made_alongside_another(envs, "99999999-new\n"))
+    oo("new")
+    assert calls == [("environment", "ssh", "99999999-new")]
+
+
+def test_new_wont_guess_between_new_environments(calls, monkeypatch, envs):
+    monkeypatch.setattr(ona, "quietly", made_alongside_another(envs, "Environment created\n"))
+    result = oo("new")
+    assert result.exit_code == 1
+    assert "can't tell which environment is yours" in result.output
+    assert calls == []
 
 
 def test_new_takes_project_and_class_from_the_environment(calls, monkeypatch):
