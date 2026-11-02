@@ -104,12 +104,15 @@ def _ask(repo: tuple[str, str], envs: list[Env]) -> dict[str, BranchStatus]:
 
 
 def lookup(envs: list[Env]) -> dict[str, BranchStatus]:
-    """Each environment's pull request and push status, keyed by environment ID."""
+    """Each environment's pull request and push status, keyed by environment ID.
+
+    Environments on main are left out: it has no pull request of its own to show.
+    """
     if not shutil.which("gh"):
         raise NoGh("gh isn't installed.")
     by_repo: dict[tuple[str, str], list[Env]] = {}
     for env in envs:
-        if env.branch and (repo := _repo(env.repo_url)):
+        if env.branch and env.branch != "main" and (repo := _repo(env.repo_url)):
             by_repo.setdefault(repo, []).append(env)
     statuses: dict[str, BranchStatus] = {}
     with ThreadPoolExecutor() as pool:

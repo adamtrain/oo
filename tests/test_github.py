@@ -85,6 +85,14 @@ def test_one_query_per_repo_with_prs_and_push_status(gh):
     assert statuses["e2"].pushed is None
 
 
+def test_main_gets_left_out(gh):
+    envs = [Env.from_json(raw_env("e0", "main")), Env.from_json(raw_env("e1", "sam/a"))]
+    gh.answer = {"data": {"repository": {"p0": {"nodes": []}, "c0": {"oid": "a" * 40}}}}
+    statuses = github.lookup(envs)
+    assert [arg for arg in gh.calls[0] if arg.startswith("b")] == ["b0=sam/a"]
+    assert list(statuses) == ["e1"]
+
+
 def test_graphql_errors_become_github_errors(gh):
     gh.answer = {"data": {"repository": None}, "errors": [{"message": "Could not resolve"}]}
     with pytest.raises(GitHubError, match="Could not resolve"):
