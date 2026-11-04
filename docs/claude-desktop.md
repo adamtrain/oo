@@ -83,6 +83,9 @@ Each run rewrites `~/.ssh/oo/config`. It keeps entries whose `# last used` date 
 last 30 days and whose environment still exists, and it drops the rest. Entries without a date
 count as unused and are dropped. The current environment is always written with today's date.
 
+The app keeps its own list of SSH connections, which this doesn't change. `oo rm` and
+`oo claude --clean` take deleted environments out of that list.
+
 ## What this exposes
 
 This is the part to understand before using it.

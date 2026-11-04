@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlencode
 
 from . import ssh
@@ -26,6 +30,8 @@ CONFIG_INCLUDES = ("oo/config", "~/.ssh/oo/config")
 HOST_SUFFIX = ".claude.oo"
 STALE_DAYS = 30
 USER_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
+# What the app's connections to environments end with: oo's own host, or Ona's.
+APP_HOST_SUFFIXES = (HOST_SUFFIX, ssh.host(""))
 
 
 class ClaudeError(Exception):
@@ -250,3 +256,69 @@ def open_link(url: str) -> None:
     done = subprocess.run([opener, url], capture_output=True, text=True)
     if done.returncode:
         raise ClaudeError("Couldn't open the Claude desktop app.", hint=NOT_INSTALLED_HINT)
+
+
+def ssh_configs_path() -> Path:
+    """Where the desktop app keeps the SSH connections it offers in its picker."""
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    elif sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return base / "Claude" / "ssh_configs.json"
+
+
+def _env_id(host: Any) -> str | None:
+    """The environment an app connection goes to, or None if it isn't to one."""
+    if isinstance(host, str):
+        for suffix in APP_HOST_SUFFIXES:
+            if host.endswith(suffix):
+                return host.removesuffix(suffix)
+    return None
+
+
+def _read(path: Path) -> dict[str, Any] | None:
+    """The app's SSH connections file, or None if the app hasn't made one yet."""
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        raise ClaudeError(f"Couldn't read the Claude desktop app's SSH connections: {e}") from e
+
+
+def _write(path: Path, data: dict[str, Any]) -> None:
+    # Write beside it and swap it in, so the app never sees half a file.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", dir=path.parent, prefix=f".{path.name}.", delete=False
+    ) as f:
+        json.dump(data, f, indent=2)
+    Path(f.name).replace(path)
+
+
+def forget(stale: Callable[[str], bool], path: Path | None = None) -> list[str]:
+    """Drop the app's connections to Ona environments where `stale(env_id)` says so.
+
+    Leaves every other connection, and every other part of the file, as it was. Returns the
+    names of the connections it dropped, as the app shows them.
+    """
+    path = path or ssh_configs_path()
+    data = _read(path)
+    if data is None:
+        return []
+
+    def gone(host: Any) -> bool:
+        env_id = _env_id(host)
+        return env_id is not None and stale(env_id)
+
+    configs = data.get("configs") or []
+    dropped = [c for c in configs if gone(c.get("sshHost"))]
+    trusted = data.get("trustedHosts") or []
+    if not dropped and not any(gone(h) for h in trusted):
+        return []
+    data["configs"] = [c for c in configs if c not in dropped]
+    data["trustedHosts"] = [h for h in trusted if not gone(h)]
+    _write(path, data)
+    return [c.get("name") or c["sshHost"] for c in dropped]

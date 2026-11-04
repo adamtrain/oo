@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import sys
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, NoReturn
 
@@ -312,9 +313,40 @@ def _set_up_ssh(env: Env) -> None:
     render.success(err, "Set up SSH for Ona environments", "with ona environment ssh-config")
 
 
+def _forget_in_claude(stale: Callable[[str], bool], *, quiet: bool = False) -> None:
+    """Take connections to deleted environments out of the Claude desktop app's picker.
+
+    `quiet` says nothing when there was nothing to take out.
+    """
+    try:
+        dropped = claude.forget(stale)
+    except claude.ClaudeError as e:
+        render.warning(err, "Couldn't tidy up the Claude desktop app.", detail=str(e))
+        return
+    if dropped:
+        render.success(err, f"Removed {', '.join(dropped)} from the Claude desktop app")
+    elif not quiet:
+        render.success(err, "The Claude desktop app has nothing left over to remove.")
+
+
 @app.command("claude")
-def claude_(branch: MaybeBranch = None) -> None:
+def claude_(
+    branch: MaybeBranch = None,
+    clean: Annotated[
+        bool,
+        typer.Option(
+            "--clean",
+            help="Instead, remove environments you've deleted from the app's SSH connections.",
+        ),
+    ] = False,
+) -> None:
     """Open a Claude Code session on an environment in the Claude desktop app, over SSH."""
+    if clean:
+        if branch:
+            _fail("--clean tidies up every deleted environment, so it takes no branch.")
+        alive = {e.id for e in _load()}
+        _forget_in_claude(lambda env_id: env_id not in alive)
+        return
     try:
         claude.check_installed()
     except claude.ClaudeError as e:
@@ -565,6 +597,8 @@ def remove(branches: Branches, wait: Wait = False) -> None:
         render.success(err, f"Deleted {label}", f"in {render.duration(took)}")
     else:
         render.success(err, f"Deleting {label} in the background.")
+    deleted = {e.id for e in targets}
+    _forget_in_claude(lambda env_id: env_id in deleted, quiet=True)
 
 
 @app.command("id")

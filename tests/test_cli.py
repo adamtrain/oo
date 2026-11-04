@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from conftest import raw_env
 from typer.testing import CliRunner
@@ -211,6 +213,34 @@ def test_claude_checks_for_the_app_before_touching_the_environment(calls, monkey
     assert calls == []
 
 
+def _ona_connections(path, *env_ids: str) -> None:
+    configs = [{"id": i, "name": f"conn {i}", "sshHost": f"{i}.ona.environment"} for i in env_ids]
+    path.write_text(json.dumps({"configs": configs, "trustedHosts": []}))
+
+
+def _hosts_left(path) -> list[str]:
+    return [c["sshHost"] for c in json.loads(path.read_text())["configs"]]
+
+
+def test_claude_clean_forgets_deleted_environments(calls, ssh_configs):
+    _ona_connections(ssh_configs, "33333333-cccc", "gone-1")
+    result = oo("claude", "--clean")
+    assert result.exit_code == 0
+    assert "Removed conn gone-1 from the Claude desktop app" in result.output
+    assert _hosts_left(ssh_configs) == ["33333333-cccc.ona.environment"]
+    assert calls == []
+
+
+def test_claude_clean_says_when_theres_nothing_to_do(calls, ssh_configs):
+    _ona_connections(ssh_configs, "33333333-cccc")
+    result = oo("claude", "--clean")
+    assert "nothing left over" in result.output
+
+
+def test_claude_clean_takes_no_branch(calls):
+    assert oo("claude", "docs", "--clean").exit_code == 1
+
+
 def test_id_prints_just_the_id(calls):
     result = oo("id", "docs")
     assert result.stdout == "33333333-cccc\n"
@@ -244,6 +274,20 @@ def test_rm_deletes_without_asking(calls):
     assert result.exit_code == 0
     assert "Deleting sam/feat-10-2 and sam/docs in the background." in result.output
     assert calls == [("environment", "delete", "22222222-bbbb", "33333333-cccc", "--dont-wait")]
+
+
+def test_rm_forgets_them_in_the_claude_app_too(calls, ssh_configs):
+    _ona_connections(ssh_configs, "33333333-cccc", "11111111-aaaa")
+    result = oo("rm", "docs")
+    assert "Removed conn 33333333-cccc from the Claude desktop app" in result.output
+    assert _hosts_left(ssh_configs) == ["11111111-aaaa.ona.environment"]
+
+
+def test_rm_still_succeeds_when_the_claude_app_file_is_broken(calls, ssh_configs):
+    ssh_configs.write_text("{not json")
+    result = oo("rm", "docs")
+    assert result.exit_code == 0
+    assert "Couldn't tidy up the Claude desktop app." in result.output
 
 
 TWINS = [
