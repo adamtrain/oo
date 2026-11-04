@@ -274,19 +274,41 @@ def _env_id(host: Any) -> str | None:
     """The environment an app connection goes to, or None if it isn't to one."""
     if isinstance(host, str):
         for suffix in APP_HOST_SUFFIXES:
-            if host.endswith(suffix):
+            if host.endswith(suffix) and len(host) > len(suffix):
                 return host.removesuffix(suffix)
     return None
 
 
 def _read(path: Path) -> dict[str, Any] | None:
-    """The app's SSH connections file, or None if the app hasn't made one yet."""
+    """The app's SSH connections file, or None if the app hasn't made one yet.
+
+    The file is the app's own, not a documented format, so if it doesn't look the way oo
+    expects, oo leaves it alone rather than guess.
+    """
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as e:
         raise ClaudeError(f"Couldn't read the Claude desktop app's SSH connections: {e}") from e
+
+    def laid_out_as_expected() -> bool:
+        if not isinstance(data, dict):
+            return False
+        configs = data.get("configs", [])
+        trusted = data.get("trustedHosts", [])
+        return (
+            isinstance(configs, list)
+            and all(isinstance(c, dict) for c in configs)
+            and isinstance(trusted, list)
+        )
+
+    if not laid_out_as_expected():
+        raise ClaudeError(
+            f"{path} isn't laid out the way oo expects, so oo left it alone. "
+            "The Claude desktop app may have changed how it keeps SSH connections."
+        )
+    return data
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
@@ -295,15 +317,26 @@ def _write(path: Path, data: dict[str, Any]) -> None:
     with tempfile.NamedTemporaryFile(
         "w", dir=path.parent, prefix=f".{path.name}.", delete=False
     ) as f:
-        json.dump(data, f, indent=2)
-    Path(f.name).replace(path)
+        temp = Path(f.name)
+        try:
+            json.dump(data, f, indent=2)
+        except BaseException:
+            f.close()
+            temp.unlink(missing_ok=True)
+            raise
+    if path.exists():
+        shutil.copymode(path, temp)
+    temp.replace(path)
 
 
-def forget(stale: Callable[[str], bool], path: Path | None = None) -> list[str]:
+def forget(
+    stale: Callable[[str], bool], path: Path | None = None, *, dry_run: bool = False
+) -> list[str]:
     """Drop the app's connections to Ona environments where `stale(env_id)` says so.
 
     Leaves every other connection, and every other part of the file, as it was. Returns the
-    names of the connections it dropped, as the app shows them.
+    names of the connections it dropped, as the app shows them. With `dry_run`, only says
+    which it would drop.
     """
     path = path or ssh_configs_path()
     data = _read(path)
@@ -319,10 +352,13 @@ def forget(stale: Callable[[str], bool], path: Path | None = None) -> list[str]:
     trusted = data.get("trustedHosts") or []
     if not dropped and not any(gone(h) for h in trusted):
         return []
+    names = [c.get("name") or c["sshHost"] for c in dropped]
+    if dry_run:
+        return names
     data["configs"] = [c for c in configs if c not in dropped]
     data["trustedHosts"] = [h for h in trusted if not gone(h)]
     _write(path, data)
-    return [c.get("name") or c["sshHost"] for c in dropped]
+    return names
 
 
 def name_connection(host: str, name: str, *, rename: bool = False, path: Path | None = None) -> str:

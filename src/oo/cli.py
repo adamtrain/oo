@@ -11,7 +11,7 @@ from typing import Annotated, NoReturn
 
 import typer
 from rich.console import Console
-from rich.prompt import IntPrompt
+from rich.prompt import Confirm, IntPrompt
 
 from . import __version__, claude, github, ona, render, ssh
 from .envs import PREFIX_VAR, Ambiguous, Env, NoMatch, branch_prefix, pick, sort_envs
@@ -109,7 +109,7 @@ def _find(envs: list[Env], query: str) -> Env:
         err.print()
         err.print(render.env_table(e.candidates, prefix, width=err.width))
         err.print()
-        twins = len({c.branch for c in e.candidates}) < len(e.candidates)
+        twins = len({c.short_branch(prefix) for c in e.candidates}) < len(e.candidates)
         err.print("  Pass one of the IDs above instead." if twins else "  Be more specific.")
         raise typer.Exit(1) from None
 
@@ -200,6 +200,7 @@ MaybeBranches = Annotated[
     typer.Argument(help=BRANCH_HELP, autocompletion=_complete_branch, show_default=False),
 ]
 Wait = Annotated[bool, typer.Option("--wait", "-w", help="Wait for ona to finish.")]
+MAX_NAME = 80  # the longest name Ona takes for an environment
 
 
 def _version(value: bool) -> None:
@@ -329,6 +330,41 @@ def _forget_in_claude(stale: Callable[[str], bool], *, quiet: bool = False) -> N
         render.success(err, "The Claude desktop app has nothing left over to remove.")
 
 
+def _clean_claude(yes: bool) -> None:
+    """Take every deleted environment out of the Claude desktop app, once you've seen which."""
+    alive = {e.id for e in _load()}
+
+    def stale(env_id: str) -> bool:
+        return env_id not in alive
+
+    try:
+        doomed = claude.forget(stale, dry_run=True)
+    except claude.ClaudeError as e:
+        _fail("Couldn't tidy up the Claude desktop app.", detail=str(e))
+    # Ona only lists the environments in your current context, so one signed in elsewhere would
+    # make every connection look deleted. Show which before taking any out.
+    if doomed and not yes:
+        render.question(
+            err,
+            f"Ona doesn't list {len(doomed)} of the Claude desktop app's environments: "
+            f"{', '.join(doomed)}.",
+        )
+        if not _interactive():
+            _fail(
+                "Not removing them without asking.",
+                hint="Run it in a terminal to confirm, or pass [bold]--yes[/].",
+            )
+        try:
+            sure = Confirm.ask(
+                f"[{render.ACCENT}]Remove them from the app?[/]", console=err, default=False
+            )
+        except (KeyboardInterrupt, EOFError):
+            _cancelled()
+        if not sure:
+            _cancelled()
+    _forget_in_claude(stale)
+
+
 @app.command("claude")
 def claude_(
     branch: MaybeBranch = None,
@@ -349,14 +385,18 @@ def claude_(
             show_default=False,
         ),
     ] = None,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="With --clean, remove them without asking.")
+    ] = False,
 ) -> None:
     """Open a Claude Code session on an environment in the Claude desktop app, over SSH."""
     if clean:
         if branch or name:
             _fail("--clean tidies up every deleted environment, so it takes no branch or name.")
-        alive = {e.id for e in _load()}
-        _forget_in_claude(lambda env_id: env_id not in alive)
+        _clean_claude(yes)
         return
+    if yes:
+        _fail("--yes only goes with --clean.")
     try:
         claude.check_installed()
     except claude.ClaudeError as e:
@@ -452,8 +492,20 @@ def new(
             show_default=False,
         ),
     ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            "-n",
+            help="A name for it, like [bold]login-fix[/], to find it by before it has a branch.",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Create an environment and connect to it."""
+    name = (name or "").strip()
+    if len(name) > MAX_NAME:
+        _fail(f"Ona takes names of up to {MAX_NAME} characters.", hint=f"That one has {len(name)}.")
     try:
         with (
             err.status(render.working("Asking Ona…"), spinner_style=render.ACCENT),
@@ -481,6 +533,7 @@ def new(
         "create",
         chosen.id,
         *(["--class-id", where.id] if where else []),
+        *(["--name", name] if name else []),
         failed="Ona couldn't create the environment.",
         cancelled="Ona may still finish creating it. Run oo to check.",
     )

@@ -54,3 +54,10 @@ def test_twins_get_told_apart_by_id_and_creation():
     assert "Created" in text
     assert "aaaaaa" in text and "0000-" not in text
     assert "Sep 28" in text and "Sep 29" in text
+
+
+def test_detached_environments_show_their_names():
+    text = render([Env.from_json(raw_env("abc-123", "(detached)", name="AuthFix"))])
+    assert "AuthFix" in text
+    assert "(detached)" not in text
+    assert "Created" not in text

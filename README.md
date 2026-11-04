@@ -84,6 +84,7 @@ oo claude --clean             # take deleted environments out of the app's SSH c
 oo cp notes.md dist login:    # copy files and folders into the repo on adam/login-fix
 oo cp login:out/report.csv .  # …or out of it
 oo new                        # create an environment and SSH into it
+oo new -n login-fix           # …named login-fix, so oo c login-fix finds it
 oo start login billing        # warm some up in the background
 oo stop                       # stop the only running one (--all for every one)
 oo rm old-spike               # delete one
@@ -151,6 +152,7 @@ time. To choose, use the options or set them in your shell profile:
 | --- | --- | --- | --- |
 | **Project** | `-p, --project` | `OO_PROJECT` | An ID or name from `ona project list` |
 | **Class** | `-c, --class` | `OO_CLASS` | An ID from `ona environment list-classes`, or words that pick one out, like `frankfurt` or `tokyo m7i` |
+| **Name** | `-n, --name` | | Up to 80 characters. oo finds it by this name, as it does by branch |
 
 Class words prefer the classes the project offers, the same choices as Ona's region picker. Once
 Ona has started the environment, oo connects to it. It starts on the project's default branch.
@@ -195,9 +197,10 @@ gave it in the app stays. To choose one, pass `--name`.
 
 The app remembers each environment it has connected to in its SSH picker. `oo rm` takes the
 ones it deletes out of that list, and `oo claude --clean` takes out any left from environments
-deleted some other way. Both edit the app's `ssh_configs.json`, and only touch connections to
-environments (`*.claude.oo` or `*.ona.environment`) that no longer exist. Stopped environments stay, with any names you
-gave them. If the app is open, quit and reopen it to see the list update.
+deleted some other way, after showing you which and asking (`--yes` skips that). Both edit the
+app's `ssh_configs.json`, and only touch connections to environments (`*.claude.oo` or
+`*.ona.environment`) that no longer exist. Stopped environments stay, with any names you gave
+them. If the app is open, quit and reopen it to see the list update.
 
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
 that wasn't there before.

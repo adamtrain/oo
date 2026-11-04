@@ -49,6 +49,21 @@ def test_falls_back_to_the_spec_before_cloning():
     assert (e.branch, e.repo, e.phase, e.last_active) == ("sam/new", "y", "creating", None)
 
 
+def test_a_detached_head_shows_the_name_instead():
+    e = env("abc", "(detached)", name="AuthFix")
+    assert (e.branch, e.short_branch("sam/")) == ("", "AuthFix")
+
+
+def test_a_detached_head_without_a_name_shows_the_id_not_the_clone_target():
+    raw = raw_env("abc", "(detached)")
+    raw["spec"]["content"] = {"initializer": {"specs": [{"git": {"cloneTarget": "main"}}]}}
+    assert Env.from_json(raw).short_branch("sam/") == "abc"
+
+
+def test_detached_isnt_something_to_match_on():
+    assert matches([env("abc", "(detached)", name="AuthFix")], "det", "sam/") == []
+
+
 def test_shows_deleting_and_stopping_as_soon_as_theyre_asked_for():
     assert env("abc", "sam/x", "running", desired="deleted").phase == "deleting"
     assert env("abc", "sam/x", "stopped", desired="deleted").phase == "deleting"
