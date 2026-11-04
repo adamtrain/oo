@@ -108,7 +108,7 @@ def _find(envs: list[Env], query: str) -> Env:
         err.print()
         err.print(render.env_table(e.candidates, prefix, width=err.width))
         err.print()
-        twins = len({c.branch for c in e.candidates}) < len(e.candidates)
+        twins = len({c.short_branch(prefix) for c in e.candidates}) < len(e.candidates)
         err.print("  Pass one of the IDs above instead." if twins else "  Be more specific.")
         raise typer.Exit(1) from None
 

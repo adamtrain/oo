@@ -13,6 +13,9 @@ PREFIX_VAR = "OO_BRANCH_PREFIX"
 # IDs are UUIDv7s, which share a timestamp up front, so the end is what tells them apart.
 SHORT_ID_LENGTH = 6
 
+# What Ona reports when HEAD isn't on a branch, as jj always leaves it.
+DETACHED = "(detached)"
+
 # Most settled first, so the list shows what you're working on at the top.
 PHASE_ORDER = ["running", "starting", "creating", "updating", "stopping", "stopped"]
 
@@ -78,10 +81,15 @@ class Env:
         checkout = _dig(data, "status", "content", "contentLocationInMachine") or ""
         if not checkout and initializer.get("checkoutLocation"):
             checkout = f"/workspaces/{initializer['checkoutLocation']}"
+        branch = git.get("branch") or initializer.get("cloneTarget") or ""
+        # The branch it was cloned from says nothing about where a detached HEAD is now, so go
+        # without, and let the name or ID stand in for it.
+        if branch == DETACHED:
+            branch = ""
         return cls(
             id=data.get("id", ""),
             name=_dig(data, "metadata", "name") or "",
-            branch=git.get("branch") or initializer.get("cloneTarget") or "",
+            branch=branch,
             repo_url=git.get("cloneUrl") or initializer.get("remoteUri") or "",
             phase=phase if phase and phase != "unspecified" else "unknown",
             last_active=_timestamp(_dig(data, "status", "activitySignal", "timestamp"))
