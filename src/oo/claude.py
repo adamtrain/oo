@@ -358,3 +358,27 @@ def forget(
     data["trustedHosts"] = [h for h in trusted if not gone(h)]
     _write(path, data)
     return names
+
+
+def name_connection(
+    host: str, name: str, *, rename: bool = False, path: Path | None = None
+) -> str | None:
+    """Give the app's connection to `host` a name to show in its SSH picker.
+
+    `host` is the one the link opens, so the name lands on the connection the app uses. Only
+    names a connection the app already has: the app adds it the first time it connects, and oo
+    doesn't make up entries in a file that isn't its own. A name you already gave it in the app
+    stays, unless `rename`. Returns the new name, or None if it changed nothing.
+    """
+    path = path or ssh_configs_path()
+    data = _read(path)
+    if data is None:
+        return None
+    existing = next((c for c in data.get("configs", []) if c.get("sshHost") == host), None)
+    if existing is None or existing.get("name") == name:
+        return None
+    if not rename and existing.get("name") not in (None, "", host):
+        return None
+    existing["name"] = name
+    _write(path, data)
+    return name

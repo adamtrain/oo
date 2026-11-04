@@ -87,9 +87,9 @@ The app keeps its own list of SSH connections, which this doesn't change. `oo rm
 `oo claude --clean` take deleted environments out of that list.
 
 That list is the app's `ssh_configs.json`, a file of the app's own rather than a documented
-format, so a new version of the app could change it. oo only removes entries for environment
-hosts, keeps every other part of the file as it was, and leaves the file alone if it isn't laid
-out the way oo expects. `--clean` counts an environment as deleted when Ona doesn't list it, and
+format, so a new version of the app could change it. oo only removes or names entries the app
+made for environment hosts, never adds any, keeps every other part of the file as it was, and
+leaves the file alone if it isn't laid out the way oo expects. `--clean` counts an environment as deleted when Ona doesn't list it, and
 Ona only lists the environments in your current context, so it shows you which it would remove
 and asks first.
 

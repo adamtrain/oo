@@ -375,14 +375,23 @@ def claude_(
             help="Instead, remove environments you've deleted from the app's SSH connections.",
         ),
     ] = False,
+    label: Annotated[
+        str | None,
+        typer.Option(
+            "--label",
+            help="What to call the connection in the app's SSH picker. Without it, an unnamed "
+            "one is named after the branch, and one you've named keeps its name.",
+            show_default=False,
+        ),
+    ] = None,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="With --clean, remove them without asking.")
     ] = False,
 ) -> None:
     """Open a Claude Code session on an environment in the Claude desktop app, over SSH."""
     if clean:
-        if branch:
-            _fail("--clean tidies up every deleted environment, so it takes no branch.")
+        if branch or label:
+            _fail("--clean tidies up every deleted environment, so it takes no branch or label.")
         _clean_claude(yes)
         return
     if yes:
@@ -397,6 +406,13 @@ def claude_(
     note = _start_if_stopped(env)
     host = _claude_host(env, envs)
     render.heading(err, "Opening in Claude", env, branch_prefix(), note)
+    label = (label or "").strip()
+    try:
+        named = label or env.short_branch(branch_prefix())
+        if called := claude.name_connection(host, named, rename=bool(label)):
+            render.success(err, f"Shows as {called} in the app's SSH connections")
+    except claude.ClaudeError as e:
+        render.warning(err, "Couldn't name the connection in the Claude desktop app.", str(e))
     try:
         claude.open_link(claude.link(env.id, env.checkout, host=host))
     except claude.ClaudeError as e:

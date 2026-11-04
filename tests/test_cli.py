@@ -222,6 +222,62 @@ def _hosts_left(path) -> list[str]:
     return [c["sshHost"] for c in json.loads(path.read_text())["configs"]]
 
 
+def _names(path) -> dict[str, str]:
+    return {c["sshHost"]: c["name"] for c in json.loads(path.read_text())["configs"]}
+
+
+def _unnamed(path, *hosts: str) -> None:
+    configs = [{"id": h, "name": h, "sshHost": h} for h in hosts]
+    path.write_text(json.dumps({"configs": configs, "trustedHosts": []}))
+
+
+def test_claude_names_the_connection_after_the_branch(calls, ssh_configs):
+    _unnamed(ssh_configs, "33333333-cccc.ona.environment")
+    result = oo("claude", "docs")
+    assert "Shows as docs in the app's SSH connections" in result.output
+    assert _names(ssh_configs) == {"33333333-cccc.ona.environment": "docs"}
+    assert calls[-1][0] == "open"
+
+
+def test_claude_leaves_the_file_alone_before_the_app_has_connected(calls, ssh_configs):
+    result = oo("claude", "docs")
+    assert "Shows as" not in result.output
+    assert not ssh_configs.exists()
+    assert calls[-1][0] == "open"
+
+
+def test_claude_names_the_connection_the_link_opens(calls, ssh_configs, monkeypatch):
+    monkeypatch.setattr(claude, "set_up_host", lambda env_id, live_ids: f"{env_id}.claude.oo")
+    _unnamed(ssh_configs, "33333333-cccc.ona.environment", "33333333-cccc.claude.oo")
+    oo("claude", "docs")
+    assert _names(ssh_configs) == {
+        "33333333-cccc.ona.environment": "33333333-cccc.ona.environment",
+        "33333333-cccc.claude.oo": "docs",
+    }
+    assert "ssh_host=33333333-cccc.claude.oo" in calls[-1][1]
+
+
+def test_claude_label_option_renames_it(calls, ssh_configs):
+    _ona_connections(ssh_configs, "33333333-cccc")
+    oo("claude", "docs", "--label", "Docs refresh")
+    assert _names(ssh_configs) == {"33333333-cccc.ona.environment": "Docs refresh"}
+
+
+def test_claude_keeps_a_name_you_gave_it(calls, ssh_configs):
+    _ona_connections(ssh_configs, "33333333-cccc")
+    result = oo("claude", "docs")
+    assert "Shows as" not in result.output
+    assert _names(ssh_configs) == {"33333333-cccc.ona.environment": "conn 33333333-cccc"}
+
+
+def test_claude_still_opens_when_it_cant_name_the_connection(calls, ssh_configs):
+    ssh_configs.write_text("{not json")
+    result = oo("claude", "docs")
+    assert result.exit_code == 0
+    assert "Couldn't name the connection" in result.output
+    assert calls[-1][0] == "open"
+
+
 def test_claude_clean_forgets_deleted_environments(calls, ssh_configs):
     _ona_connections(ssh_configs, "33333333-cccc", "gone-1")
     result = oo("claude", "--clean", "--yes")
@@ -281,8 +337,9 @@ def test_claude_clean_says_when_theres_nothing_to_do(calls, ssh_configs):
     assert "nothing left over" in result.output
 
 
-def test_claude_clean_takes_no_branch(calls):
+def test_claude_clean_takes_no_branch_or_label(calls):
     assert oo("claude", "docs", "--clean").exit_code == 1
+    assert oo("claude", "--clean", "--label", "x").exit_code == 1
 
 
 def test_id_prints_just_the_id(calls):
