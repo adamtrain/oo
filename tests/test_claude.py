@@ -301,3 +301,34 @@ def test_ssh_configs_path_follows_the_platform(monkeypatch, platform, ending):
     monkeypatch.setattr(claude.sys, "platform", platform)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     assert claude.ssh_configs_path().as_posix().endswith(ending)
+
+
+def test_forget_can_just_say_what_it_would_drop(ssh_configs):
+    _write_configs(ssh_configs, [_connection("dead", "Old work")], ["dead.ona.environment"])
+    before = ssh_configs.read_text()
+    assert claude.forget(lambda env_id: True, dry_run=True) == ["Old work"]
+    assert ssh_configs.read_text() == before
+
+
+@pytest.mark.parametrize(
+    "data",
+    [[], {"configs": {}}, {"configs": ["dead.ona.environment"]}, {"trustedHosts": "x"}],
+)
+def test_forget_leaves_a_file_it_doesnt_understand_alone(ssh_configs, data):
+    ssh_configs.write_text(json.dumps(data))
+    before = ssh_configs.read_text()
+    with pytest.raises(claude.ClaudeError, match="left it alone"):
+        claude.forget(lambda env_id: True)
+    assert ssh_configs.read_text() == before
+
+
+def test_forget_ignores_a_host_with_no_environment_id(ssh_configs):
+    _write_configs(ssh_configs, [{"id": "c", "sshHost": ".ona.environment"}], [])
+    assert claude.forget(lambda env_id: True) == []
+
+
+def test_forget_keeps_the_files_permissions(ssh_configs):
+    _write_configs(ssh_configs, [_connection("dead", "Old work")], [])
+    ssh_configs.chmod(0o644)
+    claude.forget(lambda env_id: True)
+    assert ssh_configs.stat().st_mode & 0o777 == 0o644

@@ -190,9 +190,10 @@ to clean up.
 
 The app remembers each environment it has connected to in its SSH picker. `oo rm` takes the
 ones it deletes out of that list, and `oo claude --clean` takes out any left from environments
-deleted some other way. Both edit the app's `ssh_configs.json`, and only touch connections to
-environments (`*.claude.oo` or `*.ona.environment`) that no longer exist. Stopped environments stay, with any names you
-gave them. If the app is open, quit and reopen it to see the list update.
+deleted some other way, after showing you which and asking (`--yes` skips that). Both edit the
+app's `ssh_configs.json`, and only touch connections to environments (`*.claude.oo` or
+`*.ona.environment`) that no longer exist. Stopped environments stay, with any names you gave
+them. If the app is open, quit and reopen it to see the list update.
 
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
 that wasn't there before.

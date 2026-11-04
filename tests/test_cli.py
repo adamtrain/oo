@@ -224,11 +224,55 @@ def _hosts_left(path) -> list[str]:
 
 def test_claude_clean_forgets_deleted_environments(calls, ssh_configs):
     _ona_connections(ssh_configs, "33333333-cccc", "gone-1")
-    result = oo("claude", "--clean")
+    result = oo("claude", "--clean", "--yes")
     assert result.exit_code == 0
     assert "Removed conn gone-1 from the Claude desktop app" in result.output
     assert _hosts_left(ssh_configs) == ["33333333-cccc.ona.environment"]
     assert calls == []
+
+
+def test_claude_clean_asks_first(calls, ssh_configs, monkeypatch):
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    _ona_connections(ssh_configs, "33333333-cccc", "gone-1")
+    result = oo("claude", "--clean", input="y\n")
+    assert "doesn't list 1 of the Claude desktop app's environments: conn gone-1" in result.output
+    assert _hosts_left(ssh_configs) == ["33333333-cccc.ona.environment"]
+
+
+def test_claude_clean_leaves_them_when_you_say_no(calls, ssh_configs, monkeypatch):
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    _ona_connections(ssh_configs, "33333333-cccc", "gone-1")
+    before = ssh_configs.read_text()
+    result = oo("claude", "--clean", input="n\n")
+    assert "Cancelled" in result.output
+    assert ssh_configs.read_text() == before
+
+
+def test_claude_clean_wont_remove_without_asking(calls, ssh_configs):
+    _ona_connections(ssh_configs, "gone-1")
+    before = ssh_configs.read_text()
+    result = oo("claude", "--clean")
+    assert result.exit_code == 1
+    assert "--yes" in result.output
+    assert ssh_configs.read_text() == before
+
+
+def test_claude_clean_tidies_stray_trusted_hosts_without_asking(calls, ssh_configs):
+    ssh_configs.write_text(json.dumps({"configs": [], "trustedHosts": ["gone-1.ona.environment"]}))
+    result = oo("claude", "--clean")
+    assert result.exit_code == 0
+    assert json.loads(ssh_configs.read_text())["trustedHosts"] == []
+
+
+def test_claude_clean_stops_when_the_file_looks_wrong(calls, ssh_configs):
+    ssh_configs.write_text(json.dumps({"configs": "nope"}))
+    result = oo("claude", "--clean", "--yes")
+    assert result.exit_code == 1
+    assert "left it alone" in result.output
+
+
+def test_claude_yes_goes_only_with_clean(calls):
+    assert oo("claude", "docs", "--yes").exit_code == 1
 
 
 def test_claude_clean_says_when_theres_nothing_to_do(calls, ssh_configs):
