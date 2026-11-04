@@ -334,20 +334,16 @@ def test_forget_keeps_the_files_permissions(ssh_configs):
     assert ssh_configs.stat().st_mode & 0o777 == 0o644
 
 
-def test_name_connection_adds_one_the_app_doesnt_have_yet(ssh_configs):
+def test_name_connection_leaves_ones_the_app_doesnt_have_yet(ssh_configs):
     _write_configs(ssh_configs, [], ["devbox.example.com"])
-    assert claude.name_connection("new.ona.environment", "login-fix") == "login-fix"
-    data = json.loads(ssh_configs.read_text())
-    [added] = data["configs"]
-    assert added["name"] == "login-fix"
-    assert added["sshHost"] == "new.ona.environment"
-    assert added["id"]
-    assert data["trustedHosts"] == ["devbox.example.com"]  # trusting it stays the app's call
+    before = ssh_configs.read_text()
+    assert claude.name_connection("new.ona.environment", "login-fix") is None
+    assert ssh_configs.read_text() == before
 
 
-def test_name_connection_starts_the_file_when_theres_none(ssh_configs):
-    assert claude.name_connection("new.ona.environment", "login-fix") == "login-fix"
-    assert json.loads(ssh_configs.read_text())["configs"][0]["name"] == "login-fix"
+def test_name_connection_makes_no_file_when_theres_none(ssh_configs):
+    assert claude.name_connection("new.ona.environment", "login-fix") is None
+    assert not ssh_configs.exists()
 
 
 def test_name_connection_names_one_still_called_by_its_host(ssh_configs):
@@ -360,7 +356,7 @@ def test_name_connection_names_one_still_called_by_its_host(ssh_configs):
 def test_name_connection_keeps_a_name_you_gave_it(ssh_configs):
     _write_configs(ssh_configs, [_connection("env", "Login work")], [])
     before = ssh_configs.read_text()
-    assert claude.name_connection("env.ona.environment", "login-fix") == "Login work"
+    assert claude.name_connection("env.ona.environment", "login-fix") is None
     assert ssh_configs.read_text() == before
 
 
@@ -368,3 +364,8 @@ def test_name_connection_renames_when_asked(ssh_configs):
     _write_configs(ssh_configs, [_connection("env", "Login work")], [])
     assert claude.name_connection("env.ona.environment", "login-fix", rename=True) == "login-fix"
     assert json.loads(ssh_configs.read_text())["configs"][0]["name"] == "login-fix"
+
+
+def test_name_connection_says_nothing_changed_when_its_already_named_that(ssh_configs):
+    _write_configs(ssh_configs, [_connection("env", "login-fix")], [])
+    assert claude.name_connection("env.ona.environment", "login-fix", rename=True) is None

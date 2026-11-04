@@ -375,13 +375,12 @@ def claude_(
             help="Instead, remove environments you've deleted from the app's SSH connections.",
         ),
     ] = False,
-    name: Annotated[
+    label: Annotated[
         str | None,
         typer.Option(
-            "--name",
-            "-n",
-            help="What to call the connection in the app's SSH picker. Without it, a new or "
-            "unnamed one is named after the branch, and one you've named keeps its name.",
+            "--label",
+            help="What to call the connection in the app's SSH picker. Without it, an unnamed "
+            "one is named after the branch, and one you've named keeps its name.",
             show_default=False,
         ),
     ] = None,
@@ -391,8 +390,8 @@ def claude_(
 ) -> None:
     """Open a Claude Code session on an environment in the Claude desktop app, over SSH."""
     if clean:
-        if branch or name:
-            _fail("--clean tidies up every deleted environment, so it takes no branch or name.")
+        if branch or label:
+            _fail("--clean tidies up every deleted environment, so it takes no branch or label.")
         _clean_claude(yes)
         return
     if yes:
@@ -407,10 +406,11 @@ def claude_(
     note = _start_if_stopped(env)
     host = _claude_host(env, envs)
     render.heading(err, "Opening in Claude", env, branch_prefix(), note)
-    suggested = (name or "").strip() or env.name or env.short_branch(branch_prefix())
+    label = (label or "").strip()
     try:
-        called = claude.name_connection(host, suggested, rename=bool(name and name.strip()))
-        render.success(err, f"Shows as {called} in the app's SSH connections")
+        named = label or env.short_branch(branch_prefix())
+        if called := claude.name_connection(host, named, rename=bool(label)):
+            render.success(err, f"Shows as {called} in the app's SSH connections")
     except claude.ClaudeError as e:
         render.warning(err, "Couldn't name the connection in the Claude desktop app.", str(e))
     try:

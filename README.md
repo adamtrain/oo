@@ -79,7 +79,7 @@ oo c                          # …the only running one, or pick from a list
 oo c login -- git status      # run one command instead of opening a shell
 oo open login -e cursor       # open it in Cursor (or set $OO_EDITOR)
 oo claude login               # open a Claude Code session on it in the Claude desktop app
-oo claude login -n "Login fix" # …and call it "Login fix" in the app's SSH picker
+oo claude login --label Login # …and call it Login in the app's SSH picker
 oo claude --clean             # take deleted environments out of the app's SSH connections
 oo cp notes.md dist login:    # copy files and folders into the repo on adam/login-fix
 oo cp login:out/report.csv .  # …or out of it
@@ -191,9 +191,10 @@ over Ona's SFTP server, so `oo claude` sets up a second SSH host for each enviro
 key. [docs/claude-desktop.md](docs/claude-desktop.md) explains why, the security trade-offs, and how
 to clean up.
 
-Before opening the link, oo names the environment's connection in the app's SSH picker after
-its branch (or its Ona name), so you see `login-fix` there rather than a long ID. A name you
-gave it in the app stays. To choose one, pass `--name`.
+The app adds a connection to its SSH picker the first time it opens an environment, called by
+its long host name. From then on, `oo claude` names it after the environment's branch (or its
+Ona name, if it has no branch), so you see `login-fix` there instead. A name you gave it in the
+app stays. To choose one, pass `--label`.
 
 The app remembers each environment it has connected to in its SSH picker. `oo rm` takes the
 ones it deletes out of that list, and `oo claude --clean` takes out any left from environments

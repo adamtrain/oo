@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import uuid
 from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
@@ -361,26 +360,25 @@ def forget(
     return names
 
 
-def name_connection(host: str, name: str, *, rename: bool = False, path: Path | None = None) -> str:
+def name_connection(
+    host: str, name: str, *, rename: bool = False, path: Path | None = None
+) -> str | None:
     """Give the app's connection to `host` a name to show in its SSH picker.
 
-    `host` is the one the link opens, so the name lands on the connection the app uses. Adds
-    the connection if the app doesn't have it yet. A name you already gave it in the app stays,
-    unless `rename`. Returns the name the connection ends up with.
+    `host` is the one the link opens, so the name lands on the connection the app uses. Only
+    names a connection the app already has: the app adds it the first time it connects, and oo
+    doesn't make up entries in a file that isn't its own. A name you already gave it in the app
+    stays, unless `rename`. Returns the new name, or None if it changed nothing.
     """
     path = path or ssh_configs_path()
-    data = _read(path) or {"configs": [], "trustedHosts": []}
-    configs = data.setdefault("configs", [])
-    existing = next((c for c in configs if c.get("sshHost") == host), None)
-    if existing is None:
-        configs.append(
-            {"id": str(uuid.uuid4()), "name": name, "sshHost": host, "source": "desktop"}
-        )
-    elif rename or existing.get("name") in (None, "", host):
-        if existing.get("name") == name:
-            return name
-        existing["name"] = name
-    else:
-        return existing["name"]
+    data = _read(path)
+    if data is None:
+        return None
+    existing = next((c for c in data.get("configs", []) if c.get("sshHost") == host), None)
+    if existing is None or existing.get("name") == name:
+        return None
+    if not rename and existing.get("name") not in (None, "", host):
+        return None
+    existing["name"] = name
     _write(path, data)
     return name
