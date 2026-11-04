@@ -330,6 +330,18 @@ def test_new_takes_project_and_class_from_the_environment(calls, monkeypatch):
     assert calls[0] == ("environment", "create", "p-1", "--class-id", "c-tk")
 
 
+def test_new_names_the_environment(calls):
+    oo("new", "--name", " login-fix ")
+    assert calls[0] == ("environment", "create", "p-1", "--class-id", "c-fr", "--name", "login-fix")
+
+
+def test_new_refuses_names_ona_wont_take(calls):
+    result = oo("new", "-n", "x" * 81)
+    assert result.exit_code == 1
+    assert "up to 80 characters" in result.output
+    assert calls == []
+
+
 def test_new_complains_about_unknown_classes(calls):
     result = oo("new", "--class", "mars")
     assert result.exit_code == 1

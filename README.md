@@ -82,6 +82,7 @@ oo claude login               # open a Claude Code session on it in the Claude d
 oo cp notes.md dist login:    # copy files and folders into the repo on adam/login-fix
 oo cp login:out/report.csv .  # …or out of it
 oo new                        # create an environment and SSH into it
+oo new -n login-fix           # …named login-fix, so oo c login-fix finds it
 oo start login billing        # warm some up in the background
 oo stop                       # stop the only running one (--all for every one)
 oo rm old-spike               # delete one
@@ -149,6 +150,7 @@ time. To choose, use the options or set them in your shell profile:
 | --- | --- | --- | --- |
 | **Project** | `-p, --project` | `OO_PROJECT` | An ID or name from `ona project list` |
 | **Class** | `-c, --class` | `OO_CLASS` | An ID from `ona environment list-classes`, or words that pick one out, like `frankfurt` or `tokyo m7i` |
+| **Name** | `-n, --name` | | Up to 80 characters. oo finds it by this name, as it does by branch |
 
 Class words prefer the classes the project offers, the same choices as Ona's region picker. Once
 Ona has started the environment, oo connects to it. It starts on the project's default branch.
