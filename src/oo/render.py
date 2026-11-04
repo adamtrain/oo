@@ -105,11 +105,11 @@ def env_table(
 ) -> Table:
     """One row per environment, fitted to `width` by cutting the branch short if need be.
 
-    When branches repeat, rows also show the end of their ID and when they were created, to
+    When the shown names repeat, rows also show the end of their ID and when they were created, to
     tell them apart. Pass what GitHub said about each branch as `github` to get a PR column.
     """
     show_repo = len({e.repo for e in envs}) > 1
-    twins = len({e.branch for e in envs}) < len(envs)
+    twins = len({e.short_branch(prefix) for e in envs}) < len(envs)
     table = Table(box=None, pad_edge=False, padding=(0, 1), header_style=FAINT)
     if numbered:
         table.add_column("#", justify="right", style=FAINT, no_wrap=True)

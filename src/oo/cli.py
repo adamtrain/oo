@@ -108,7 +108,7 @@ def _find(envs: list[Env], query: str) -> Env:
         err.print()
         err.print(render.env_table(e.candidates, prefix, width=err.width))
         err.print()
-        twins = len({c.branch for c in e.candidates}) < len(e.candidates)
+        twins = len({c.short_branch(prefix) for c in e.candidates}) < len(e.candidates)
         err.print("  Pass one of the IDs above instead." if twins else "  Be more specific.")
         raise typer.Exit(1) from None
 
@@ -217,7 +217,7 @@ EPILOG = (
     "  [cyan]oo claude login[/]              open it in the Claude desktop app\n"
     "  [cyan]oo cp notes.md login:[/]        copy a file into its repo\n"
     "  [cyan]oo cp login:out.csv .[/]        …or out of it\n"
-    "  [cyan]oo new[/]                       create an environment and connect to it\n"
+    "  [cyan]oo new login-fix[/]             create an environment named login-fix, connect\n"
     "  [cyan]oo stop --all[/]                stop everything that's running\n"
     "  [cyan]ona env logs $(oo id login)[/]  hand an ID to any other ona command\n\n"
     "[bold]Branch prefix[/]\n\n"
@@ -382,6 +382,14 @@ def copy(
 
 @app.command()
 def new(
+    name: Annotated[
+        str | None,
+        typer.Argument(
+            help="Name for the environment. oo shows it when there's no branch to show, "
+            "as with jj.",
+            show_default=False,
+        ),
+    ] = None,
     project: Annotated[
         str | None,
         typer.Option(
@@ -433,6 +441,7 @@ def new(
         "create",
         chosen.id,
         *(["--class-id", where.id] if where else []),
+        *(["--name", name] if name else []),
         failed="Ona couldn't create the environment.",
         cancelled="Ona may still finish creating it. Run oo to check.",
     )
