@@ -45,3 +45,13 @@ def raw_env(
 def _clean_environment(monkeypatch):
     for var in ("OO_BRANCH_PREFIX", "OO_EDITOR", "OO_PROJECT", "OO_CLASS"):
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def ssh_configs(monkeypatch, tmp_path):
+    """Keep tests away from the real Claude desktop app's SSH connections."""
+    from oo import claude
+
+    path = tmp_path / "ssh_configs.json"
+    monkeypatch.setattr(claude, "ssh_configs_path", lambda: path)
+    return path

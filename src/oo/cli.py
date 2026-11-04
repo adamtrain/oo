@@ -5,12 +5,13 @@ from __future__ import annotations
 import difflib
 import sys
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, NoReturn
 
 import typer
 from rich.console import Console
-from rich.prompt import IntPrompt
+from rich.prompt import Confirm, IntPrompt
 
 from . import __version__, claude, github, ona, render, ssh
 from .envs import PREFIX_VAR, Ambiguous, Env, NoMatch, branch_prefix, pick, sort_envs
@@ -313,9 +314,79 @@ def _set_up_ssh(env: Env) -> None:
     render.success(err, "Set up SSH for Ona environments", "with ona environment ssh-config")
 
 
+def _forget_in_claude(stale: Callable[[str], bool], *, quiet: bool = False) -> None:
+    """Take connections to deleted environments out of the Claude desktop app's picker.
+
+    `quiet` says nothing when there was nothing to take out.
+    """
+    try:
+        dropped = claude.forget(stale)
+    except claude.ClaudeError as e:
+        render.warning(err, "Couldn't tidy up the Claude desktop app.", detail=str(e))
+        return
+    if dropped:
+        render.success(err, f"Removed {', '.join(dropped)} from the Claude desktop app")
+    elif not quiet:
+        render.success(err, "The Claude desktop app has nothing left over to remove.")
+
+
+def _clean_claude(yes: bool) -> None:
+    """Take every deleted environment out of the Claude desktop app, once you've seen which."""
+    alive = {e.id for e in _load()}
+
+    def stale(env_id: str) -> bool:
+        return env_id not in alive
+
+    try:
+        doomed = claude.forget(stale, dry_run=True)
+    except claude.ClaudeError as e:
+        _fail("Couldn't tidy up the Claude desktop app.", detail=str(e))
+    # Ona only lists the environments in your current context, so one signed in elsewhere would
+    # make every connection look deleted. Show which before taking any out.
+    if doomed and not yes:
+        render.question(
+            err,
+            f"Ona doesn't list {len(doomed)} of the Claude desktop app's environments: "
+            f"{', '.join(doomed)}.",
+        )
+        if not _interactive():
+            _fail(
+                "Not removing them without asking.",
+                hint="Run it in a terminal to confirm, or pass [bold]--yes[/].",
+            )
+        try:
+            sure = Confirm.ask(
+                f"[{render.ACCENT}]Remove them from the app?[/]", console=err, default=False
+            )
+        except (KeyboardInterrupt, EOFError):
+            _cancelled()
+        if not sure:
+            _cancelled()
+    _forget_in_claude(stale)
+
+
 @app.command("claude")
-def claude_(branch: MaybeBranch = None) -> None:
+def claude_(
+    branch: MaybeBranch = None,
+    clean: Annotated[
+        bool,
+        typer.Option(
+            "--clean",
+            help="Instead, remove environments you've deleted from the app's SSH connections.",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="With --clean, remove them without asking.")
+    ] = False,
+) -> None:
     """Open a Claude Code session on an environment in the Claude desktop app, over SSH."""
+    if clean:
+        if branch:
+            _fail("--clean tidies up every deleted environment, so it takes no branch.")
+        _clean_claude(yes)
+        return
+    if yes:
+        _fail("--yes only goes with --clean.")
     try:
         claude.check_installed()
     except claude.ClaudeError as e:
@@ -579,6 +650,8 @@ def remove(branches: Branches, wait: Wait = False) -> None:
         render.success(err, f"Deleted {label}", f"in {render.duration(took)}")
     else:
         render.success(err, f"Deleting {label} in the background.")
+    deleted = {e.id for e in targets}
+    _forget_in_claude(lambda env_id: env_id in deleted, quiet=True)
 
 
 @app.command("id")

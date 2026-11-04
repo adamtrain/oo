@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from datetime import date, timedelta
 from pathlib import Path
@@ -226,3 +227,108 @@ def test_set_up_host_treats_an_include_after_a_host_block_as_missing(home):
     (folder / ".ssh" / "config").write_text("Host *\nInclude oo/config\n")
     claude.set_up_host("abc-123", {"abc-123"})
     assert (folder / ".ssh" / "config").read_text().startswith("Include oo/config\n\nHost *\n")
+
+
+def _connection(env_id: str, name: str) -> dict[str, str]:
+    return {"id": f"conn-{env_id}", "name": name, "sshHost": f"{env_id}.ona.environment"}
+
+
+def _write_configs(path, configs, trusted, **extra):
+    path.write_text(json.dumps({"configs": configs, "trustedHosts": trusted, **extra}))
+
+
+def test_forget_drops_only_stale_ona_connections(ssh_configs):
+    elsewhere = {"id": "conn-box", "name": "My box", "sshHost": "devbox.example.com"}
+    configs = [_connection("dead", "Old work"), _connection("live", "Login work"), elsewhere]
+    trusted = ["dead.ona.environment", "live.ona.environment", "devbox.example.com"]
+    _write_configs(ssh_configs, configs, trusted, future="kept")
+
+    assert claude.forget(lambda env_id: env_id == "dead") == ["Old work"]
+
+    data = json.loads(ssh_configs.read_text())
+    assert data["configs"] == configs[1:]
+    assert data["trustedHosts"] == trusted[1:]
+    assert data["future"] == "kept"
+
+
+def test_forget_knows_oos_own_hosts_as_well_as_onas(ssh_configs):
+    via_oo = {"id": "c", "name": "Old work", "sshHost": "dead.claude.oo"}
+    _write_configs(ssh_configs, [via_oo, _connection("live", "Login work")], ["dead.claude.oo"])
+    assert claude.forget(lambda env_id: env_id == "dead") == ["Old work"]
+    data = json.loads(ssh_configs.read_text())
+    assert [c["sshHost"] for c in data["configs"]] == ["live.ona.environment"]
+    assert data["trustedHosts"] == []
+
+
+def test_forget_tidies_trusted_hosts_left_without_a_connection(ssh_configs):
+    _write_configs(ssh_configs, [], ["dead.ona.environment"])
+    assert claude.forget(lambda env_id: True) == []
+    assert json.loads(ssh_configs.read_text())["trustedHosts"] == []
+
+
+def test_forget_leaves_the_file_alone_when_nothing_is_stale(ssh_configs):
+    _write_configs(ssh_configs, [_connection("live", "Login work")], ["live.ona.environment"])
+    before = ssh_configs.read_text()
+    assert claude.forget(lambda env_id: False) == []
+    assert ssh_configs.read_text() == before
+
+
+def test_forget_names_unnamed_connections_by_host(ssh_configs):
+    _write_configs(ssh_configs, [{"id": "c", "sshHost": "dead.ona.environment"}], [])
+    assert claude.forget(lambda env_id: True) == ["dead.ona.environment"]
+
+
+def test_forget_does_nothing_without_the_app(ssh_configs):
+    assert claude.forget(lambda env_id: True) == []
+    assert not ssh_configs.exists()
+
+
+def test_forget_says_when_it_cant_read_the_file(ssh_configs):
+    ssh_configs.write_text("{not json")
+    with pytest.raises(claude.ClaudeError, match="Couldn't read"):
+        claude.forget(lambda env_id: True)
+
+
+@pytest.mark.parametrize(
+    ("platform", "ending"),
+    [
+        ("darwin", "Library/Application Support/Claude/ssh_configs.json"),
+        ("linux", ".config/Claude/ssh_configs.json"),
+    ],
+)
+def test_ssh_configs_path_follows_the_platform(monkeypatch, platform, ending):
+    monkeypatch.undo()  # the real function, not conftest's stand-in
+    monkeypatch.setattr(claude.sys, "platform", platform)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    assert claude.ssh_configs_path().as_posix().endswith(ending)
+
+
+def test_forget_can_just_say_what_it_would_drop(ssh_configs):
+    _write_configs(ssh_configs, [_connection("dead", "Old work")], ["dead.ona.environment"])
+    before = ssh_configs.read_text()
+    assert claude.forget(lambda env_id: True, dry_run=True) == ["Old work"]
+    assert ssh_configs.read_text() == before
+
+
+@pytest.mark.parametrize(
+    "data",
+    [[], {"configs": {}}, {"configs": ["dead.ona.environment"]}, {"trustedHosts": "x"}],
+)
+def test_forget_leaves_a_file_it_doesnt_understand_alone(ssh_configs, data):
+    ssh_configs.write_text(json.dumps(data))
+    before = ssh_configs.read_text()
+    with pytest.raises(claude.ClaudeError, match="left it alone"):
+        claude.forget(lambda env_id: True)
+    assert ssh_configs.read_text() == before
+
+
+def test_forget_ignores_a_host_with_no_environment_id(ssh_configs):
+    _write_configs(ssh_configs, [{"id": "c", "sshHost": ".ona.environment"}], [])
+    assert claude.forget(lambda env_id: True) == []
+
+
+def test_forget_keeps_the_files_permissions(ssh_configs):
+    _write_configs(ssh_configs, [_connection("dead", "Old work")], [])
+    ssh_configs.chmod(0o644)
+    claude.forget(lambda env_id: True)
+    assert ssh_configs.stat().st_mode & 0o777 == 0o644

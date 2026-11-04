@@ -79,6 +79,7 @@ oo c                          # …the only running one, or pick from a list
 oo c login -- git status      # run one command instead of opening a shell
 oo open login -e cursor       # open it in Cursor (or set $OO_EDITOR)
 oo claude login               # open a Claude Code session on it in the Claude desktop app
+oo claude --clean             # take deleted environments out of the app's SSH connections
 oo cp notes.md dist login:    # copy files and folders into the repo on adam/login-fix
 oo cp login:out/report.csv .  # …or out of it
 oo new                        # create an environment and SSH into it
@@ -188,6 +189,13 @@ connected over SSH to the environment and starting in its repo. The app can't in
 over Ona's SFTP server, so `oo claude` sets up a second SSH host for each environment, with its own
 key. [docs/claude-desktop.md](docs/claude-desktop.md) explains why, the security trade-offs, and how
 to clean up.
+
+The app remembers each environment it has connected to in its SSH picker. `oo rm` takes the
+ones it deletes out of that list, and `oo claude --clean` takes out any left from environments
+deleted some other way, after showing you which and asking (`--yes` skips that). Both edit the
+app's `ssh_configs.json`, and only touch connections to environments (`*.claude.oo` or
+`*.ona.environment`) that no longer exist. Stopped environments stay, with any names you gave
+them. If the app is open, quit and reopen it to see the list update.
 
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
 that wasn't there before.

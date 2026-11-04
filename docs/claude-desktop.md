@@ -83,6 +83,16 @@ Each run rewrites `~/.ssh/oo/config`. It keeps entries whose `# last used` date 
 last 30 days and whose environment still exists, and it drops the rest. Entries without a date
 count as unused and are dropped. The current environment is always written with today's date.
 
+The app keeps its own list of SSH connections, which this doesn't change. `oo rm` and
+`oo claude --clean` take deleted environments out of that list.
+
+That list is the app's `ssh_configs.json`, a file of the app's own rather than a documented
+format, so a new version of the app could change it. oo only removes entries for environment
+hosts, keeps every other part of the file as it was, and leaves the file alone if it isn't laid
+out the way oo expects. `--clean` counts an environment as deleted when Ona doesn't list it, and
+Ona only lists the environments in your current context, so it shows you which it would remove
+and asks first.
+
 ## What this exposes
 
 This is the part to understand before using it.
