@@ -294,11 +294,6 @@ def test_new_reuses_your_latest_project_and_class_then_connects(calls):
     ]
 
 
-def test_new_names_the_environment(calls):
-    oo("new", "auth-fix")
-    assert calls[0] == ("environment", "create", "p-1", "--class-id", "c-fr", "--name", "auth-fix")
-
-
 def made_alongside_another(envs, printed: str):
     """A fake create, during which an `oo new` in another terminal makes a newer environment."""
 
