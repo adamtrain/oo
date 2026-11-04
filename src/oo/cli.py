@@ -199,6 +199,7 @@ MaybeBranches = Annotated[
     typer.Argument(help=BRANCH_HELP, autocompletion=_complete_branch, show_default=False),
 ]
 Wait = Annotated[bool, typer.Option("--wait", "-w", help="Wait for ona to finish.")]
+MAX_NAME = 80  # the longest name Ona takes for an environment
 
 
 def _version(value: bool) -> None:
@@ -404,8 +405,20 @@ def new(
             show_default=False,
         ),
     ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            "-n",
+            help="A name for it, like [bold]login-fix[/], to find it by before it has a branch.",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Create an environment and connect to it."""
+    name = (name or "").strip()
+    if len(name) > MAX_NAME:
+        _fail(f"Ona takes names of up to {MAX_NAME} characters.", hint=f"That one has {len(name)}.")
     try:
         with (
             err.status(render.working("Asking Ona…"), spinner_style=render.ACCENT),
@@ -433,6 +446,7 @@ def new(
         "create",
         chosen.id,
         *(["--class-id", where.id] if where else []),
+        *(["--name", name] if name else []),
         failed="Ona couldn't create the environment.",
         cancelled="Ona may still finish creating it. Run oo to check.",
     )
