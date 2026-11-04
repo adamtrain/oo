@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
@@ -322,3 +323,28 @@ def forget(stale: Callable[[str], bool], path: Path | None = None) -> list[str]:
     data["trustedHosts"] = [h for h in trusted if not gone(h)]
     _write(path, data)
     return [c.get("name") or c["sshHost"] for c in dropped]
+
+
+def name_connection(host: str, name: str, *, rename: bool = False, path: Path | None = None) -> str:
+    """Give the app's connection to `host` a name to show in its SSH picker.
+
+    `host` is the one the link opens, so the name lands on the connection the app uses. Adds
+    the connection if the app doesn't have it yet. A name you already gave it in the app stays,
+    unless `rename`. Returns the name the connection ends up with.
+    """
+    path = path or ssh_configs_path()
+    data = _read(path) or {"configs": [], "trustedHosts": []}
+    configs = data.setdefault("configs", [])
+    existing = next((c for c in configs if c.get("sshHost") == host), None)
+    if existing is None:
+        configs.append(
+            {"id": str(uuid.uuid4()), "name": name, "sshHost": host, "source": "desktop"}
+        )
+    elif rename or existing.get("name") in (None, "", host):
+        if existing.get("name") == name:
+            return name
+        existing["name"] = name
+    else:
+        return existing["name"]
+    _write(path, data)
+    return name

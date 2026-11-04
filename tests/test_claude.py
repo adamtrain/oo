@@ -301,3 +301,39 @@ def test_ssh_configs_path_follows_the_platform(monkeypatch, platform, ending):
     monkeypatch.setattr(claude.sys, "platform", platform)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     assert claude.ssh_configs_path().as_posix().endswith(ending)
+
+
+def test_name_connection_adds_one_the_app_doesnt_have_yet(ssh_configs):
+    _write_configs(ssh_configs, [], ["devbox.example.com"])
+    assert claude.name_connection("new.ona.environment", "login-fix") == "login-fix"
+    data = json.loads(ssh_configs.read_text())
+    [added] = data["configs"]
+    assert added["name"] == "login-fix"
+    assert added["sshHost"] == "new.ona.environment"
+    assert added["id"]
+    assert data["trustedHosts"] == ["devbox.example.com"]  # trusting it stays the app's call
+
+
+def test_name_connection_starts_the_file_when_theres_none(ssh_configs):
+    assert claude.name_connection("new.ona.environment", "login-fix") == "login-fix"
+    assert json.loads(ssh_configs.read_text())["configs"][0]["name"] == "login-fix"
+
+
+def test_name_connection_names_one_still_called_by_its_host(ssh_configs):
+    _write_configs(ssh_configs, [_connection("env", "env.ona.environment")], [])
+    assert claude.name_connection("env.ona.environment", "login-fix") == "login-fix"
+    [conn] = json.loads(ssh_configs.read_text())["configs"]
+    assert conn == {**_connection("env", "login-fix")}
+
+
+def test_name_connection_keeps_a_name_you_gave_it(ssh_configs):
+    _write_configs(ssh_configs, [_connection("env", "Login work")], [])
+    before = ssh_configs.read_text()
+    assert claude.name_connection("env.ona.environment", "login-fix") == "Login work"
+    assert ssh_configs.read_text() == before
+
+
+def test_name_connection_renames_when_asked(ssh_configs):
+    _write_configs(ssh_configs, [_connection("env", "Login work")], [])
+    assert claude.name_connection("env.ona.environment", "login-fix", rename=True) == "login-fix"
+    assert json.loads(ssh_configs.read_text())["configs"][0]["name"] == "login-fix"
