@@ -494,6 +494,57 @@ def test_new_complains_about_unknown_classes(calls):
     assert calls == []
 
 
+CREATE = ("environment", "create", "p-1", "--class-id", "c-fr")
+CHECK_OUT = (
+    "environment",
+    "exec",
+    "99999999-new",
+    "--timeout",
+    "600",
+    "--working-dir",
+    "/workspaces/widgets",
+    "--",
+    "sh",
+    "-c",
+    cli.CHECK_OUT,
+    "sh",
+    "pr-123-branch",
+)
+
+
+@pytest.mark.parametrize("flag", ["-b", "--branch"])
+def test_new_branch_checks_out_before_connecting(calls, flag):
+    result = oo("new", flag, "pr-123-branch")
+    assert isinstance(result.exception, Called)
+    assert "Checking out" in result.output
+    assert calls == [CREATE, CHECK_OUT, ("environment", "ssh", "99999999-new")]
+
+
+def test_new_carries_on_when_the_checkout_fails(calls, monkeypatch):
+    fake = ona.quietly
+
+    def quietly(*args, failed, on_tick=None):
+        if args[:2] == ("environment", "exec"):
+            calls.append(args)
+            raise OnaError(failed, detail="invalid reference: pr-123-branch")
+        return fake(*args, failed=failed, on_tick=on_tick)
+
+    monkeypatch.setattr(ona, "quietly", quietly)
+    result = oo("new", "-b", "pr-123-branch")
+    assert isinstance(result.exception, Called)
+    assert "Ona couldn't check out pr-123-branch." in result.output
+    assert "invalid reference" in result.output
+    assert calls == [CREATE, CHECK_OUT, ("environment", "ssh", "99999999-new")]
+
+
+@pytest.mark.parametrize("branch", ["", "-x", "a b"])
+def test_new_refuses_bad_branches_before_creating(calls, branch):
+    result = oo("new", "-b", branch)
+    assert result.exit_code == 1
+    assert "can't be a branch name" in result.output
+    assert calls == []
+
+
 def test_start_and_stop_say_what_they_did(calls):
     assert "Starting sam/docs in the background." in oo("start", "docs").output
     assert "Stopped sam/feat-10 in 3s" in oo("stop", "feat-10", "--wait").output

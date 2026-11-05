@@ -85,6 +85,7 @@ oo cp notes.md dist login:    # copy files and folders into the repo on adam/log
 oo cp login:out/report.csv .  # …or out of it
 oo new                        # create an environment and SSH into it
 oo new -n login-fix           # …named login-fix, so oo c login-fix finds it
+oo new -b pr-9                # …check out branch pr-9, then SSH into it
 oo start login billing        # warm some up in the background
 oo stop                       # stop the only running one (--all for every one)
 oo rm old-spike               # delete one
@@ -204,7 +205,8 @@ app's `ssh_configs.json`, and only touch connections to environments (`*.claude.
 them. If the app is open, quit and reopen it to see the list update.
 
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
-that wasn't there before.
+that wasn't there before. With `-b BRANCH`, it first runs `ona environment exec` to fetch that
+branch and `git switch` to it. If that fails, oo warns and carries on.
 
 ## Development
 
