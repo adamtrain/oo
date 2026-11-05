@@ -494,6 +494,116 @@ def test_new_complains_about_unknown_classes(calls):
     assert calls == []
 
 
+CREATE = ("environment", "create", "p-1", "--class-id", "c-fr")
+NEW_LINK = (
+    "claude://code/new?ssh_host=99999999-new.ona.environment&ssh_folder=%2Fworkspaces%2Fwidgets"
+)
+
+
+@pytest.mark.parametrize(
+    "then", [["-t", "open", "-t", "ssh"], ["-t", "ssh,open"], ["--then", "SSH, open"]]
+)
+def test_new_then_opens_the_editor_before_connecting(calls, monkeypatch, then):
+    monkeypatch.delenv("OO_EDITOR", raising=False)
+    result = oo("new", *then)
+    assert isinstance(result.exception, Called)
+    assert calls == [
+        CREATE,
+        ("environment", "open", "99999999-new"),
+        ("environment", "ssh", "99999999-new"),
+    ]
+
+
+def test_new_then_open_uses_the_editor_you_name(calls, monkeypatch):
+    monkeypatch.setenv("OO_EDITOR", "vscode")
+    oo("new", "-t", "open", "-e", "cursor")
+    assert calls[-1] == ("environment", "open", "99999999-new", "--editor", "cursor")
+
+
+def test_new_then_open_uses_oo_editor(calls, monkeypatch):
+    monkeypatch.setenv("OO_EDITOR", "cursor")
+    result = oo("new", "-t", "open")
+    assert result.exit_code == 0
+    assert calls == [CREATE, ("environment", "open", "99999999-new", "--editor", "cursor")]
+
+
+def test_new_then_does_each_step_once(calls, monkeypatch):
+    monkeypatch.delenv("OO_EDITOR", raising=False)
+    oo("new", "-t", "open", "-t", "open,open")
+    assert calls == [CREATE, ("environment", "open", "99999999-new")]
+
+
+def test_new_then_claude_opens_the_desktop_app_and_doesnt_connect(calls):
+    result = oo("new", "-t", "claude")
+    assert result.exit_code == 0
+    assert "Opening in Claude" in result.output
+    assert calls == [CREATE, ("open", NEW_LINK)]
+
+
+def test_new_then_none_only_creates(calls):
+    result = oo("new", "-t", "none")
+    assert result.exit_code == 0
+    assert "Created main" in result.output
+    assert calls == [CREATE]
+
+
+@pytest.mark.parametrize(
+    ("then", "says"),
+    [
+        (["-t", "none", "-t", "ssh"], "--then none can't go with other steps."),
+        (["-t", "none,open"], "--then none can't go with other steps."),
+        (["-t", "vim"], "oo new can't --then vim."),
+    ],
+)
+def test_new_then_refuses_bad_steps_before_creating(calls, then, says):
+    result = oo("new", *then)
+    assert result.exit_code == 1
+    assert says in result.output
+    assert calls == []
+
+
+def test_new_then_claude_checks_for_the_app_before_creating(calls, monkeypatch):
+    def missing():
+        raise claude.ClaudeError("The Claude desktop app isn't installed.")
+
+    monkeypatch.setattr(claude, "check_installed", missing)
+    result = oo("new", "-t", "claude")
+    assert result.exit_code == 1
+    assert "isn't installed" in result.output
+    assert calls == []
+
+
+def test_new_carries_on_when_the_editor_wont_open(calls, monkeypatch):
+    monkeypatch.delenv("OO_EDITOR", raising=False)
+    fake = ona.quietly
+
+    def quietly(*args, failed, on_tick=None):
+        if args[:2] == ("environment", "open"):
+            raise OnaError(failed, detail="no editor found")
+        return fake(*args, failed=failed, on_tick=on_tick)
+
+    monkeypatch.setattr(ona, "quietly", quietly)
+    result = oo("new", "-t", "open,claude,ssh")
+    assert "Ona couldn't open your editor." in result.output
+    assert "no editor found" in result.output
+    assert calls == [CREATE, ("open", NEW_LINK), ("environment", "ssh", "99999999-new")]
+
+
+def test_new_carries_on_when_the_claude_app_wont_open(calls, monkeypatch):
+    def broken(url):
+        raise claude.ClaudeError("Couldn't open the Claude desktop app.")
+
+    monkeypatch.setattr(claude, "open_link", broken)
+    result = oo("new", "-t", "claude", "-t", "ssh")
+    assert "Couldn't open the Claude desktop app." in result.output
+    assert calls == [CREATE, ("environment", "ssh", "99999999-new")]
+
+
+def test_complete_then_offers_the_steps_after_a_comma():
+    assert cli._complete_then("o") == ["open"]
+    assert cli._complete_then("open,s") == ["open,ssh"]
+
+
 def test_start_and_stop_say_what_they_did(calls):
     assert "Starting sam/docs in the background." in oo("start", "docs").output
     assert "Stopped sam/feat-10 in 3s" in oo("stop", "feat-10", "--wait").output

@@ -34,7 +34,7 @@ $ oo c login
 - **Knows what you mean.** `oo c`, `oo open` and `oo claude` with no branch use the one running
   environment, or let you pick from a list. Typos get a "did you mean".
 - **A fresh environment in one command.** `oo new` creates an environment the way you did last
-  time and connects you to it.
+  time and connects you to it, or opens it in your editor or the Claude app.
 - **Doesn't make you wait.** Starting, stopping and deleting return straight away while Ona
   carries on in the background.
 - **Quiet.** ona's own output stays behind a spinner with a timer. If something goes wrong, you
@@ -85,6 +85,9 @@ oo cp notes.md dist login:    # copy files and folders into the repo on adam/log
 oo cp login:out/report.csv .  # …or out of it
 oo new                        # create an environment and SSH into it
 oo new -n login-fix           # …named login-fix, so oo c login-fix finds it
+oo new -t open,ssh            # …open it in your editor, then SSH into it
+oo new -t claude              # …open it in the Claude desktop app instead
+oo new -t none                # …just create it
 oo start login billing        # warm some up in the background
 oo stop                       # stop the only running one (--all for every one)
 oo rm old-spike               # delete one
@@ -162,7 +165,7 @@ Ona has started the environment, oo connects to it. It starts on the project's d
 | Variable | |
 | --- | --- |
 | `OO_BRANCH_PREFIX` | Your branch prefix, e.g. `adam/`. Dimmed in the list and optional when typing. |
-| `OO_EDITOR` | Default editor for `oo open`: an alias from `ona environment list-editors`, like `cursor` |
+| `OO_EDITOR` | Default editor for `oo open` and `oo new -t open`: an alias from `ona environment list-editors`, like `cursor` |
 | `OO_PROJECT` | Default project for `oo new` |
 | `OO_CLASS` | Default environment class for `oo new` |
 
