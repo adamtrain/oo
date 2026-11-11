@@ -200,7 +200,44 @@ MaybeBranches = Annotated[
     typer.Argument(help=BRANCH_HELP, autocompletion=_complete_branch, show_default=False),
 ]
 Wait = Annotated[bool, typer.Option("--wait", "-w", help="Wait for ona to finish.")]
+Editor = Annotated[
+    str | None,
+    typer.Option(
+        "--editor",
+        "-e",
+        envvar="OO_EDITOR",
+        help="Editor alias like [bold]cursor[/] or [bold]vscode[/] "
+        "(see [bold]ona environment list-editors[/]).",
+        show_default=False,
+    ),
+]
 MAX_NAME = 80  # the longest name Ona takes for an environment
+
+# What oo new can do once the environment is ready, in the order it does them. ssh comes
+# last because it replaces oo.
+THEN = ("open", "claude", "ssh", "none")
+
+
+def _complete_then(incomplete: str) -> list[str]:
+    done, _, last = incomplete.rpartition(",")
+    prefix = f"{done}," if done else ""
+    return [prefix + step for step in THEN if step.startswith(last.lower())]
+
+
+def _then_steps(values: list[str] | None) -> list[str]:
+    """What `--then` asks for, without repeats, in the order to do them. Fails on bad ones."""
+    asked = {v.strip().lower() for value in values or [] for v in value.split(",") if v.strip()}
+    if unknown := sorted(asked - set(THEN)):
+        _fail(
+            f"oo new can't --then {', '.join(unknown)}.",
+            hint=f"Use {', '.join(f'[bold]{s}[/]' for s in THEN)}.",
+        )
+    if "none" in asked and len(asked) > 1:
+        _fail(
+            "--then none can't go with other steps.",
+            hint="Use [bold]-t none[/] alone, or leave it out.",
+        )
+    return [step for step in THEN if step in asked] or ["ssh"]
 
 
 def _version(value: bool) -> None:
@@ -221,6 +258,7 @@ EPILOG = (
     "  [cyan]oo cp login:out.csv .[/]        …or out of it\n"
     "  [cyan]oo new[/]                       create an environment and connect to it\n"
     "  [cyan]oo new -b pr-9[/]               …check out branch pr-9 first\n"
+    "  [cyan]oo new -t open,ssh[/]           …open it in your editor, then connect\n"
     "  [cyan]oo stop --all[/]                stop everything that's running\n"
     "  [cyan]ona env logs $(oo id login)[/]  hand an ID to any other ona command\n\n"
     "[bold]Branch prefix[/]\n\n"
@@ -276,20 +314,7 @@ def connect(
 
 
 @app.command("open")
-def open_(
-    branch: MaybeBranch = None,
-    editor: Annotated[
-        str | None,
-        typer.Option(
-            "--editor",
-            "-e",
-            envvar="OO_EDITOR",
-            help="Editor alias like [bold]cursor[/] or [bold]vscode[/] "
-            "(see [bold]ona environment list-editors[/]).",
-            show_default=False,
-        ),
-    ] = None,
-) -> None:
+def open_(branch: MaybeBranch = None, editor: Editor = None) -> None:
     """Open an environment in your editor, starting it first if it's stopped."""
     env = _choose(_load(), branch, "open")
     notes = [_start_if_stopped(env), f"in {editor}" if editor else ""]
@@ -405,19 +430,27 @@ def claude_(
     env = _choose(envs, branch, "open in Claude")
     _set_up_ssh(env)
     note = _start_if_stopped(env)
+    try:
+        _open_in_claude(env, envs, note, label or "")
+    except claude.ClaudeError as e:
+        _fail(str(e), hint=e.hint)
+
+
+def _open_in_claude(env: Env, envs: list[Env], note: str = "", label: str = "") -> None:
+    """Open a Claude Code session on `env` in the Claude app. Raises ClaudeError if it can't.
+
+    Names the app's connection `label`, or after the branch if you haven't named it.
+    """
     host = _claude_host(env, envs)
     render.heading(err, "Opening in Claude", env, branch_prefix(), note)
-    label = (label or "").strip()
+    label = label.strip()
     try:
         named = label or env.short_branch(branch_prefix())
         if called := claude.name_connection(host, named, rename=bool(label)):
             render.success(err, f"Shows as {called} in the app's SSH connections")
     except claude.ClaudeError as e:
         render.warning(err, "Couldn't name the connection in the Claude desktop app.", str(e))
-    try:
-        claude.open_link(claude.link(env.id, env.checkout, host=host))
-    except claude.ClaudeError as e:
-        _fail(str(e), hint=e.hint)
+    claude.open_link(claude.link(env.id, env.checkout, host=host))
 
 
 def _claude_host(env: Env, envs: list[Env]) -> str:
@@ -512,8 +545,22 @@ def new(
             show_default=False,
         ),
     ] = None,
+    then: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--then",
+            "-t",
+            help="What to do once it's ready: [bold]ssh[/] (the default), [bold]open[/] to open "
+            "it in your editor, [bold]claude[/] to open it in the Claude desktop app, or "
+            "[bold]none[/]. Give more than one, like [bold]-t open -t ssh[/] or "
+            "[bold]-t open,ssh[/]; ssh always goes last.",
+            autocompletion=_complete_then,
+            show_default=False,
+        ),
+    ] = None,
+    editor: Editor = None,
 ) -> None:
-    """Create an environment and connect to it."""
+    """Create an environment, then connect to it or open it (see [bold]--then[/])."""
     name = (name or "").strip()
     if len(name) > MAX_NAME:
         _fail(f"Ona takes names of up to {MAX_NAME} characters.", hint=f"That one has {len(name)}.")
@@ -522,6 +569,12 @@ def new(
             f"{branch!r} can't be a branch name.",
             hint="Give a branch without spaces that doesn't start with a hyphen.",
         )
+    steps = _then_steps(then)
+    if "claude" in steps:
+        try:
+            claude.check_installed()
+        except claude.ClaudeError as e:
+            _fail(str(e), hint=e.hint)
     try:
         with (
             err.status(render.working("Asking Ona…"), spinner_style=render.ACCENT),
@@ -553,7 +606,8 @@ def new(
         failed="Ona couldn't create the environment.",
         cancelled="Ona may still finish creating it. Run oo to check.",
     )
-    fresh = [e for e in _load() if e.id not in before]
+    now = _load()
+    fresh = [e for e in now if e.id not in before]
     # Another oo new running alongside makes more than one new environment, so go by the ID
     # ona printed, and only by there being just the one new environment if it didn't print one.
     created = next((e for e in fresh if e.id in output), fresh[0] if len(fresh) == 1 else None)
@@ -566,8 +620,40 @@ def new(
     if branch:
         _check_out(created, branch, note)
         note = ""
-    render.heading(err, "Connecting to", created, branch_prefix(), note)
-    ona.replace_with("environment", "ssh", created.id)
+    if steps == ["none"]:
+        render.success(err, f"Created {render.names([created])}", note)
+        return
+    if "open" in steps:
+        _open_in_editor(created, editor, note)
+        note = ""
+    if "claude" in steps:
+        try:
+            _open_in_claude(created, now, note)
+        except claude.ClaudeError as e:
+            render.warning(err, str(e), detail=e.hint)
+        note = ""
+    if "ssh" in steps:
+        render.heading(err, "Connecting to", created, branch_prefix(), note)
+        ona.replace_with("environment", "ssh", created.id)
+
+
+def _open_in_editor(env: Env, editor: str | None, note: str = "") -> None:
+    """Have ona open `env` in your editor, and carry on. Only warns if it can't."""
+    notes = (note, f"in {editor}" if editor else "")
+    render.heading(err, "Opening", env, branch_prefix(), ", ".join(n for n in notes if n))
+    try:
+        with err.status(render.working("Opening your editor…"), spinner_style=render.ACCENT):
+            ona.quietly(
+                "environment",
+                "open",
+                env.id,
+                *(["--editor", editor] if editor else []),
+                failed="Ona couldn't open your editor.",
+            )
+    except OnaError as e:
+        render.warning(err, str(e), detail=e.detail)
+    except KeyboardInterrupt:
+        _cancelled()
 
 
 # Fetch the branch by name, so it works on shallow and single-branch clones too, then switch to
