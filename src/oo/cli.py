@@ -220,6 +220,7 @@ EPILOG = (
     "  [cyan]oo cp notes.md login:[/]        copy a file into its repo\n"
     "  [cyan]oo cp login:out.csv .[/]        …or out of it\n"
     "  [cyan]oo new[/]                       create an environment and connect to it\n"
+    "  [cyan]oo new -b pr-9[/]               …check out branch pr-9 first\n"
     "  [cyan]oo stop --all[/]                stop everything that's running\n"
     "  [cyan]ona env logs $(oo id login)[/]  hand an ID to any other ona command\n\n"
     "[bold]Branch prefix[/]\n\n"
@@ -501,11 +502,26 @@ def new(
             show_default=False,
         ),
     ] = None,
+    branch: Annotated[
+        str | None,
+        typer.Option(
+            "--branch",
+            "-b",
+            help="Branch to check out once it's ready, before it connects. "
+            "If the checkout fails, oo warns and carries on.",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Create an environment and connect to it."""
     name = (name or "").strip()
     if len(name) > MAX_NAME:
         _fail(f"Ona takes names of up to {MAX_NAME} characters.", hint=f"That one has {len(name)}.")
+    if branch is not None and not safe_branch(branch):
+        _fail(
+            f"{branch!r} can't be a branch name.",
+            hint="Give a branch without spaces that doesn't start with a hyphen.",
+        )
     try:
         with (
             err.status(render.working("Asking Ona…"), spinner_style=render.ACCENT),
@@ -546,10 +562,52 @@ def new(
             "Ona created it, but I can't tell which environment is yours to connect.",
             hint="Run [bold]oo[/] to look.",
         )
-    render.heading(
-        err, "Connecting to", created, branch_prefix(), f"created in {render.duration(took)}"
-    )
+    note = f"created in {render.duration(took)}"
+    if branch:
+        _check_out(created, branch, note)
+        note = ""
+    render.heading(err, "Connecting to", created, branch_prefix(), note)
     ona.replace_with("environment", "ssh", created.id)
+
+
+# Fetch the branch by name, so it works on shallow and single-branch clones too, then switch to
+# it. The branch comes in as $1 rather than in the script, so it needs no quoting.
+CHECK_OUT = 'git fetch origin "$1:refs/remotes/origin/$1" && git switch "$1"'
+# Seconds to give the fetch and switch: more than ona's default of 120, for big repos.
+CHECK_OUT_TIMEOUT = "600"
+
+
+def safe_branch(branch: str) -> bool:
+    """Whether `branch` can go to git as a branch, not be taken for an option."""
+    return bool(branch) and not branch.startswith("-") and not any(c.isspace() for c in branch)
+
+
+def _check_out(env: Env, branch: str, note: str = "") -> None:
+    """Have ona check `branch` out in `env`, and carry on. Only warns if it can't."""
+    render.heading(
+        err, "Checking out", env, branch_prefix(), ", ".join(n for n in (note, branch) if n)
+    )
+    try:
+        with err.status(render.working(f"Checking out {branch}…"), spinner_style=render.ACCENT):
+            ona.quietly(
+                "environment",
+                "exec",
+                env.id,
+                "--timeout",
+                CHECK_OUT_TIMEOUT,
+                *(["--working-dir", env.checkout] if env.checkout else []),
+                "--",
+                "sh",
+                "-c",
+                CHECK_OUT,
+                "sh",
+                branch,
+                failed=f"Ona couldn't check out {branch}.",
+            )
+    except OnaError as e:
+        render.warning(err, str(e), detail=e.detail)
+    except KeyboardInterrupt:
+        _cancelled()
 
 
 @app.command()
