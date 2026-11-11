@@ -102,18 +102,24 @@ def env_table(
     width: int | None = None,
     numbered: bool = False,
     github: dict[str, BranchStatus] | None = None,
+    names: bool = True,
 ) -> Table:
-    """One row per environment, fitted to `width` by cutting the branch short if need be.
+    """One row per environment, fitted to `width` by cutting the branch and name short if need be.
 
-    When the shown names repeat, rows also show the end of their ID and when they were created, to
-    tell them apart. Pass what GitHub said about each branch as `github` to get a PR column.
+    Environments on a branch get a Name column if any has a name, unless `width` has no room for
+    it. When the shown names repeat, rows also show the end of their ID and when they were created,
+    to tell them apart. Pass what GitHub said about each branch as `github` to get a PR column.
     """
     show_repo = len({e.repo for e in envs}) > 1
+    # An environment without a branch already shows its name in the Branch column.
+    show_name = names and any(e.branch and e.name for e in envs)
     twins = len({e.short_branch(prefix) for e in envs}) < len(envs)
     table = Table(box=None, pad_edge=False, padding=(0, 1), header_style=FAINT)
     if numbered:
         table.add_column("#", justify="right", style=FAINT, no_wrap=True)
     table.add_column("Branch", no_wrap=True, overflow="ellipsis")
+    if show_name:
+        table.add_column("Name", no_wrap=True, overflow="ellipsis")
     if twins:
         table.add_column("ID", no_wrap=True)
     if show_repo:
@@ -131,6 +137,8 @@ def env_table(
         status = github.get(env.id) if github else None
         cells = [Text(str(i))] if numbered else []
         cells.append(branch(env, prefix))
+        if show_name:
+            cells.append(Text(env.name if env.branch else ""))
         if twins:
             cells.append(Text(env.short_id, style=ACCENT))
         if show_repo:
@@ -148,12 +156,25 @@ def env_table(
     if width is not None:
         # Every other column gets what it needs, plus a gap of 2 between columns.
         branch_index = 1 if numbered else 0
-        others = sum(
+        name_index = branch_index + 1 if show_name else None
+        needs = [
             max(len(str(column.header)), *(row[i].cell_len for row in rows))
             for i, column in enumerate(table.columns)
-            if i != branch_index
-        )
-        table.columns[branch_index].max_width = max(10, width - others - 2 * (len(rows[0]) - 1))
+        ]
+        others = sum(n for i, n in enumerate(needs) if i not in (branch_index, name_index))
+        room = width - others - 2 * (len(rows[0]) - 1)
+        if name_index is not None:
+            # The branch keeps at least 10 and the name at least 6, or the name goes. Past that, the
+            # name grows to fit while the branch keeps 20, which shows most of a branch.
+            if room < 10 + 6:
+                return env_table(
+                    envs, prefix, width=width, numbered=numbered, github=github, names=False
+                )
+            keep = min(needs[branch_index], 20)
+            name_width = min(needs[name_index], max(6, room - keep))
+            table.columns[name_index].max_width = name_width
+            room -= name_width
+        table.columns[branch_index].max_width = max(10, room)
     return table
 
 

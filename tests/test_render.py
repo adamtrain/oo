@@ -56,6 +56,30 @@ def test_twins_get_told_apart_by_id_and_creation():
     assert "Sep 28" in text and "Sep 29" in text
 
 
+def test_names_get_a_column_when_a_branch_hides_them():
+    envs = [
+        Env.from_json(raw_env("0000-aaaaaa", "main", name="vulns")),
+        Env.from_json(raw_env("0000-bbbbbb", "main")),
+    ]
+    text = render(envs)
+    assert "Name" in text
+    assert "vulns" in text
+    assert "Name" not in render([Env.from_json(raw_env("abc-123", "sam/x"))])
+
+
+def test_names_make_way_in_a_narrow_terminal():
+    envs = [
+        Env.from_json(raw_env("0000-aaaaaa", "sam/a-long-branch-name", name="a-long-name")),
+        Env.from_json(raw_env("0000-bbbbbb", "sam/other")),
+    ]
+    for width, has_name in ((60, True), (45, False)):
+        console = Console(width=width, record=True, color_system=None)
+        console.print(env_table(envs, "sam/", width=width))
+        text = console.export_text()
+        assert max(len(line) for line in text.splitlines()) <= width
+        assert ("Name" in text) is has_name
+
+
 def test_detached_environments_show_their_names():
     text = render([Env.from_json(raw_env("abc-123", "(detached)", name="AuthFix"))])
     assert "AuthFix" in text

@@ -134,6 +134,7 @@ Copies go one way at a time, between your machine and one environment.
 | | |
 | --- | --- |
 | **Status** | `●` running · `◐` starting · `○` stopped. Running environments come first, then the rest by when you last used them. |
+| **Name** | Only when an environment on a branch has a name, like one made with `oo new -n`. An environment with no branch shows its name under Branch instead. |
 | **ID**, **Created** | Only when two environments share a branch: the end of each one's ID, and when it was created. |
 | **Active** | When Ona last saw activity in the environment. |
 | **PR** | The newest pull request from the branch: draft, open, approved, changes req., merged or closed. The number links to it. |
