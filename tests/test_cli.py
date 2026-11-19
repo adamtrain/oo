@@ -29,7 +29,8 @@ def in_the_new_one(script: str, timeout: str) -> tuple[str, ...]:
 
 
 CREATE = ("environment", "create", "p-1", "--class-id", "c-fr")
-SET_UP = in_the_new_one("git pull origin main && just pp", "1800")
+PULL = in_the_new_one("git pull origin main", "600")
+PP = in_the_new_one("just pp", "1800")
 CHECK_OUT = in_the_new_one(cli.check_out_script("pr-123-branch"), "600")
 CONNECT = ("environment", "ssh", "99999999-new")
 
@@ -445,7 +446,7 @@ def test_new_reuses_your_latest_project_and_class_then_connects(calls):
     result = oo("new")
     assert "from Widgets" in result.output
     assert "m7i.xlarge in Frankfurt" in result.output
-    assert calls == [CREATE, SET_UP, CONNECT]
+    assert calls == [CREATE, PULL, PP, CONNECT]
 
 
 def made_alongside_another(envs, printed: str):
@@ -504,7 +505,7 @@ def gh_hosts(calls, monkeypatch, tmp_path):
 
 def test_new_keeps_your_gh_logins_to_itself_unless_asked(calls, gh_hosts):
     oo("new")
-    assert calls == [CREATE, SET_UP, CONNECT]
+    assert calls == [CREATE, PULL, PP, CONNECT]
 
 
 def test_new_copies_your_gh_logins_before_connecting(calls, gh_hosts):
@@ -513,7 +514,8 @@ def test_new_copies_your_gh_logins_before_connecting(calls, gh_hosts):
     assert calls == [
         CREATE,
         ("put", "99999999-new", gh_hosts, ".config/gh/hosts.yml"),
-        SET_UP,
+        PULL,
+        PP,
         CONNECT,
     ]
 
@@ -527,7 +529,7 @@ def test_new_copies_gh_logins_every_time_once_the_variable_is_set(calls, gh_host
 def test_new_can_skip_copying_gh_logins_for_once(calls, gh_hosts, monkeypatch):
     monkeypatch.setenv("OO_GH_HOSTS", "1")
     oo("new", "--no-gh-hosts")
-    assert calls == [CREATE, SET_UP, CONNECT]
+    assert calls == [CREATE, PULL, PP, CONNECT]
 
 
 def test_new_sets_up_ssh_before_copying_gh_logins(calls, gh_hosts, monkeypatch):
@@ -541,7 +543,7 @@ def test_new_connects_anyway_without_gh_logins_to_copy(calls, gh_hosts):
     gh_hosts.unlink()
     result = oo("new", "--gh-hosts")
     assert "No GitHub CLI logins to copy." in result.output
-    assert calls == [CREATE, SET_UP, CONNECT]
+    assert calls == [CREATE, PULL, PP, CONNECT]
 
 
 def test_new_connects_anyway_when_gh_logins_wont_copy(calls, gh_hosts, monkeypatch):
@@ -552,7 +554,7 @@ def test_new_connects_anyway_when_gh_logins_wont_copy(calls, gh_hosts, monkeypat
     result = oo("new", "--gh-hosts")
     assert "Couldn't copy your GitHub CLI logins." in result.output
     assert "Permission denied" in result.output
-    assert calls == [CREATE, SET_UP, CONNECT]
+    assert calls == [CREATE, PULL, PP, CONNECT]
 
 
 def test_gh_hosts_copies_to_the_only_running_one(calls, gh_hosts):
@@ -629,12 +631,14 @@ def test_new_complains_about_unknown_classes(calls):
     assert calls == []
 
 
-def failing(calls, monkeypatch, script: str, detail: str):
-    """Make running `script` in the new environment fail, saying `detail`."""
+def failing(calls, monkeypatch, script: str, detail: str, times: int = 99):
+    """Make running `script` in the new environment fail, saying `detail`, the first `times`."""
     fake = ona.quietly
+    left = [times]
 
     def quietly(*args, failed, on_tick=None):
-        if args[:2] == ("environment", "exec") and args[-1] == script:
+        if args[:2] == ("environment", "exec") and args[-1] == script and left[0]:
+            left[0] -= 1
             calls.append(args)
             raise OnaError(failed, detail=detail)
         return fake(*args, failed=failed, on_tick=on_tick)
@@ -645,16 +649,33 @@ def failing(calls, monkeypatch, script: str, detail: str):
 def test_new_sets_every_environment_up_before_anything_else(calls):
     result = oo("new", "-t", "open,ssh")
     assert "Setting up main · created in 3s, git pull origin main && just pp" in result.output
-    assert calls[:2] == [CREATE, SET_UP]
+    assert calls[:3] == [CREATE, PULL, PP]
 
 
-def test_new_carries_on_when_setting_up_fails(calls, monkeypatch):
-    failing(calls, monkeypatch, cli.SET_UP, "error: Recipe `pp` failed on line 12")
+def test_new_tries_just_pp_once_more_when_it_fails(calls, monkeypatch):
+    failing(calls, monkeypatch, cli.PREPARE, "error: Recipe `pp` failed on line 12", times=1)
+    result = oo("new", "-b", "pr-123-branch")
+    assert "just pp failed in the environment. Trying it once more." in result.output
+    assert "Recipe `pp` failed" in result.output
+    assert "just pp worked the second time" in result.output
+    assert calls == [CREATE, PULL, PP, PP, CHECK_OUT, CONNECT]
+
+
+def test_new_gives_up_on_just_pp_after_a_second_failure(calls, monkeypatch):
+    failing(calls, monkeypatch, cli.PREPARE, "error: Recipe `pp` failed on line 12")
     result = oo("new")
     assert isinstance(result.exception, Called)
-    assert "Couldn't run git pull origin main && just pp in the environment." in result.output
-    assert "Recipe `pp` failed" in result.output
-    assert calls == [CREATE, SET_UP, CONNECT]
+    assert "just pp failed again in the environment" in result.output
+    assert calls == [CREATE, PULL, PP, PP, CONNECT]
+
+
+def test_new_leaves_just_pp_out_when_the_pull_fails_and_doesnt_retry_that(calls, monkeypatch):
+    failing(calls, monkeypatch, cli.PULL, "fatal: couldn't find remote ref main")
+    result = oo("new")
+    assert isinstance(result.exception, Called)
+    assert "Couldn't run git pull origin main in the environment" in result.output
+    assert "couldn't find remote ref main" in result.output
+    assert calls == [CREATE, PULL, CONNECT]
 
 
 @pytest.mark.parametrize("flag", ["-b", "--branch"])
@@ -663,7 +684,7 @@ def test_new_branch_checks_out_once_its_set_up(calls, flag):
     assert isinstance(result.exception, Called)
     assert "Checking out" in result.output
     assert "as a new branch" not in result.output
-    assert calls == [CREATE, SET_UP, CHECK_OUT, CONNECT]
+    assert calls == [CREATE, PULL, PP, CHECK_OUT, CONNECT]
 
 
 def test_new_branch_says_when_it_started_a_new_one(calls, monkeypatch):
@@ -676,15 +697,15 @@ def test_new_branch_says_when_it_started_a_new_one(calls, monkeypatch):
     monkeypatch.setattr(ona, "quietly", quietly)
     result = oo("new", "-b", "pr-123-branch")
     assert "Started pr-123-branch as a new branch" in result.output
-    assert calls == [CREATE, SET_UP, CHECK_OUT, CONNECT]
+    assert calls == [CREATE, PULL, PP, CHECK_OUT, CONNECT]
 
 
 def test_new_branch_stays_put_when_setting_up_fails(calls, monkeypatch):
-    failing(calls, monkeypatch, cli.SET_UP, "fatal: couldn't find remote ref main")
+    failing(calls, monkeypatch, cli.PREPARE, "error: Recipe `pp` failed on line 12")
     result = oo("new", "-b", "pr-123-branch")
     assert isinstance(result.exception, Called)
     assert "rather than checking out pr-123-branch" in result.output
-    assert calls == [CREATE, SET_UP, CONNECT]
+    assert calls == [CREATE, PULL, PP, PP, CONNECT]
 
 
 def test_new_carries_on_when_the_checkout_fails(calls, monkeypatch):
@@ -693,7 +714,7 @@ def test_new_carries_on_when_the_checkout_fails(calls, monkeypatch):
     assert isinstance(result.exception, Called)
     assert "Ona couldn't check out pr-123-branch." in result.output
     assert "local changes would be overwritten" in result.output
-    assert calls == [CREATE, SET_UP, CHECK_OUT, CONNECT]
+    assert calls == [CREATE, PULL, PP, CHECK_OUT, CONNECT]
 
 
 def test_check_out_script_takes_githubs_branch_or_starts_a_new_one():
@@ -727,7 +748,7 @@ def test_new_then_opens_the_editor_before_connecting(calls, monkeypatch, then):
     monkeypatch.delenv("OO_EDITOR", raising=False)
     result = oo("new", *then)
     assert isinstance(result.exception, Called)
-    assert calls == [CREATE, SET_UP, ("environment", "open", "99999999-new"), CONNECT]
+    assert calls == [CREATE, PULL, PP, ("environment", "open", "99999999-new"), CONNECT]
 
 
 def test_new_then_open_uses_the_editor_you_name(calls, monkeypatch):
@@ -740,27 +761,32 @@ def test_new_then_open_uses_oo_editor(calls, monkeypatch):
     monkeypatch.setenv("OO_EDITOR", "cursor")
     result = oo("new", "-t", "open")
     assert result.exit_code == 0
-    assert calls == [CREATE, SET_UP, ("environment", "open", "99999999-new", "--editor", "cursor")]
+    assert calls == [
+        CREATE,
+        PULL,
+        PP,
+        ("environment", "open", "99999999-new", "--editor", "cursor"),
+    ]
 
 
 def test_new_then_does_each_step_once(calls, monkeypatch):
     monkeypatch.delenv("OO_EDITOR", raising=False)
     oo("new", "-t", "open", "-t", "open,open")
-    assert calls == [CREATE, SET_UP, ("environment", "open", "99999999-new")]
+    assert calls == [CREATE, PULL, PP, ("environment", "open", "99999999-new")]
 
 
 def test_new_then_claude_opens_the_desktop_app_and_doesnt_connect(calls):
     result = oo("new", "-t", "claude")
     assert result.exit_code == 0
     assert "Opening in Claude" in result.output
-    assert calls == [CREATE, SET_UP, ("open", NEW_LINK)]
+    assert calls == [CREATE, PULL, PP, ("open", NEW_LINK)]
 
 
 def test_new_then_none_only_creates(calls):
     result = oo("new", "-t", "none")
     assert result.exit_code == 0
     assert "Created main" in result.output
-    assert calls == [CREATE, SET_UP]
+    assert calls == [CREATE, PULL, PP]
 
 
 @pytest.mark.parametrize(
@@ -802,7 +828,7 @@ def test_new_carries_on_when_the_editor_wont_open(calls, monkeypatch):
     result = oo("new", "-t", "open,claude,ssh")
     assert "Ona couldn't open your editor." in result.output
     assert "no editor found" in result.output
-    assert calls == [CREATE, SET_UP, ("open", NEW_LINK), CONNECT]
+    assert calls == [CREATE, PULL, PP, ("open", NEW_LINK), CONNECT]
 
 
 def test_new_carries_on_when_the_claude_app_wont_open(calls, monkeypatch):
@@ -812,7 +838,7 @@ def test_new_carries_on_when_the_claude_app_wont_open(calls, monkeypatch):
     monkeypatch.setattr(claude, "open_link", broken)
     result = oo("new", "-t", "claude", "-t", "ssh")
     assert "Couldn't open the Claude desktop app." in result.output
-    assert calls == [CREATE, SET_UP, CONNECT]
+    assert calls == [CREATE, PULL, PP, CONNECT]
 
 
 def test_complete_then_offers_the_steps_after_a_comma():

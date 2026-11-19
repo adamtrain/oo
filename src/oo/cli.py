@@ -789,24 +789,49 @@ def _run_in(env: Env, doing: str, script: str, *, timeout: int, failed: str) -> 
 
 # What every new environment gets before you're let in: the latest main, then the repo's own
 # `just pp` to bring everything else in line with it.
-SET_UP = "git pull origin main && just pp"
-# Seconds to give it: far more than ona's default of 120, since it can have a lot to build.
-SET_UP_TIMEOUT = 1800
+PULL = "git pull origin main"
+PREPARE = "just pp"
+# Seconds to give each: more than ona's default of 120, and far more where there's a lot to build.
+PULL_TIMEOUT = 600
+PREPARE_TIMEOUT = 1800
 
 
 def _set_up(env: Env, note: str = "") -> bool:
-    """Run SET_UP in `env`, and carry on. Only warns if it fails, and returns whether it worked."""
-    render.heading(
-        err, "Setting up", env, branch_prefix(), ", ".join(n for n in (note, SET_UP) if n)
-    )
-    output = _run_in(
+    """Run PULL then PREPARE in `env`, and carry on. Returns whether both worked.
+
+    A failure only gets a warning. PREPARE gets a second go if its first fails, and no more.
+    """
+    both = f"{PULL} && {PREPARE}"
+    render.heading(err, "Setting up", env, branch_prefix(), ", ".join(n for n in (note, both) if n))
+    pulled = _run_in(
         env,
-        f"Running {SET_UP}…",
-        SET_UP,
-        timeout=SET_UP_TIMEOUT,
-        failed=f"Couldn't run {SET_UP} in the environment.",
+        f"Running {PULL}…",
+        PULL,
+        timeout=PULL_TIMEOUT,
+        failed=f"Couldn't run {PULL} in the environment, so left out {PREPARE} too.",
     )
-    return output is not None
+    if pulled is None:
+        return False
+    first = _run_in(
+        env,
+        f"Running {PREPARE}…",
+        PREPARE,
+        timeout=PREPARE_TIMEOUT,
+        failed=f"{PREPARE} failed in the environment. Trying it once more.",
+    )
+    if first is not None:
+        return True
+    second = _run_in(
+        env,
+        f"Running {PREPARE} again…",
+        PREPARE,
+        timeout=PREPARE_TIMEOUT,
+        failed=f"{PREPARE} failed again in the environment, so that's left for you.",
+    )
+    if second is None:
+        return False
+    render.success(err, f"{PREPARE} worked the second time")
+    return True
 
 
 # What the checkout prints when it had to start the branch, for want of one on GitHub.

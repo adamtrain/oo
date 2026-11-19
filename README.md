@@ -167,8 +167,9 @@ time. To choose, use the options or set them in your shell profile:
 Class words prefer the classes the project offers, the same choices as Ona's region picker.
 
 Once Ona has started the environment, oo sets it up by running `git pull origin main && just pp`
-in its repo. It does this for every new environment, with nothing to turn on. If that fails, oo
-shows what went wrong and carries on, so you still get connected.
+in its repo. It does this for every new environment, with nothing to turn on. If `just pp` fails,
+oo runs it once more, and no more than that. If the pull fails, or `just pp` fails twice, oo shows
+what went wrong and carries on, so you still get connected.
 
 With `-b`, oo then switches to that branch. If GitHub has the branch, you get it, tracking
 GitHub's. If not, oo starts a new branch of that name from the `main` it just pulled, and tells
@@ -242,10 +243,11 @@ app's `ssh_configs.json`, and only touch connections to environments (`*.claude.
 them. If the app is open, quit and reopen it to see the list update.
 
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
-that wasn't there before. It then runs `git pull origin main && just pp` in the repo with
-`ona environment exec`, giving it up to 30 minutes. With `-b BRANCH`, a second `exec` asks
-`git ls-remote` whether GitHub has the branch, then fetches it and runs `git switch`, or runs
-`git switch -c` to start it. If either step fails, oo warns and carries on.
+that wasn't there before. It then runs `git pull origin main` in the repo with
+`ona environment exec`, and `just pp` with another, giving that up to 30 minutes and a second
+try if the first fails. With `-b BRANCH`, one more `exec` asks `git ls-remote` whether GitHub has
+the branch, then fetches it and runs `git switch`, or runs `git switch -c` to start it. If any
+step fails, oo warns and carries on.
 
 `oo gh-hosts`, and `oo new` with `OO_GH_HOSTS` set, set up SSH as `oo cp` does, then send
 `hosts.yml` down a single `ssh` connection that makes `~/.config/gh` and writes the file so only
