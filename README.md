@@ -166,14 +166,25 @@ time. To choose, use the options or set them in your shell profile:
 
 Class words prefer the classes the project offers, the same choices as Ona's region picker.
 
-Once Ona has started the environment, oo sets it up by running `git pull origin main && just pp`
-in its repo. It does this for every new environment, with nothing to turn on. If `just pp` fails,
-oo runs it once more, and no more than that. If the pull fails, or `just pp` fails twice, oo shows
-what went wrong and carries on, so you still get connected.
+Once Ona has started the environment, oo sets it up by running `git pull origin main` and then
+`just pp` in its repo. It does this for every new environment, with nothing to turn on, and each
+gets its own line saying whether it worked and how long it took:
+
+```console
+→ Setting up main · created in 3m 02s
+✓ Ran git pull origin main in 4s
+! just pp failed in the environment. Trying it once more.
+  error: Recipe `pp` failed on line 12 with exit code 1
+✓ Ran just pp in 1m 20s, on the second try
+```
+
+If `just pp` fails, oo runs it once more, and no more than that. If the pull fails, oo leaves
+`just pp` out. Either way it shows what went wrong and carries on, so you still get connected.
 
 With `-b`, oo then switches to that branch. If GitHub has the branch, you get it, tracking
 GitHub's. If not, oo starts a new branch of that name from the `main` it just pulled, and tells
-you it did. The switch only happens once the setup has worked: if it failed, oo leaves the
+you it did. The switch only needs the pull to have worked, so that a new branch starts from the
+latest `main`; it goes ahead even if `just pp` failed. If the pull failed, oo leaves the
 environment on the project's default branch and says so. After all that, oo connects to it.
 
 To have `gh` signed in on each new environment as it is on your machine, set `OO_GH_HOSTS=1` in

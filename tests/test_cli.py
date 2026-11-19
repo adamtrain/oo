@@ -648,24 +648,29 @@ def failing(calls, monkeypatch, script: str, detail: str, times: int = 99):
 
 def test_new_sets_every_environment_up_before_anything_else(calls):
     result = oo("new", "-t", "open,ssh")
-    assert "Setting up main · created in 3s, git pull origin main && just pp" in result.output
+    assert "Setting up main · created in 3s" in result.output
+    assert "✓ Ran git pull origin main in 3s" in result.output
+    assert "✓ Ran just pp in 3s" in result.output
     assert calls[:3] == [CREATE, PULL, PP]
 
 
 def test_new_tries_just_pp_once_more_when_it_fails(calls, monkeypatch):
     failing(calls, monkeypatch, cli.PREPARE, "error: Recipe `pp` failed on line 12", times=1)
-    result = oo("new", "-b", "pr-123-branch")
+    result = oo("new")
+    assert "✓ Ran git pull origin main in 3s" in result.output
     assert "just pp failed in the environment. Trying it once more." in result.output
     assert "Recipe `pp` failed" in result.output
-    assert "just pp worked the second time" in result.output
-    assert calls == [CREATE, PULL, PP, PP, CHECK_OUT, CONNECT]
+    assert "✓ Ran just pp in 3s, on the second try" in result.output
+    assert calls == [CREATE, PULL, PP, PP, CONNECT]
 
 
 def test_new_gives_up_on_just_pp_after_a_second_failure(calls, monkeypatch):
     failing(calls, monkeypatch, cli.PREPARE, "error: Recipe `pp` failed on line 12")
     result = oo("new")
     assert isinstance(result.exception, Called)
+    assert "✓ Ran git pull origin main in 3s" in result.output
     assert "just pp failed again in the environment" in result.output
+    assert "Ran just pp" not in result.output
     assert calls == [CREATE, PULL, PP, PP, CONNECT]
 
 
@@ -673,8 +678,9 @@ def test_new_leaves_just_pp_out_when_the_pull_fails_and_doesnt_retry_that(calls,
     failing(calls, monkeypatch, cli.PULL, "fatal: couldn't find remote ref main")
     result = oo("new")
     assert isinstance(result.exception, Called)
-    assert "Couldn't run git pull origin main in the environment" in result.output
+    assert "git pull origin main failed in the environment" in result.output
     assert "couldn't find remote ref main" in result.output
+    assert "Ran git pull" not in result.output
     assert calls == [CREATE, PULL, CONNECT]
 
 
@@ -700,12 +706,20 @@ def test_new_branch_says_when_it_started_a_new_one(calls, monkeypatch):
     assert calls == [CREATE, PULL, PP, CHECK_OUT, CONNECT]
 
 
-def test_new_branch_stays_put_when_setting_up_fails(calls, monkeypatch):
+def test_new_branch_still_checks_out_when_only_just_pp_fails(calls, monkeypatch):
     failing(calls, monkeypatch, cli.PREPARE, "error: Recipe `pp` failed on line 12")
     result = oo("new", "-b", "pr-123-branch")
     assert isinstance(result.exception, Called)
+    assert "Checking out" in result.output
+    assert calls == [CREATE, PULL, PP, PP, CHECK_OUT, CONNECT]
+
+
+def test_new_branch_stays_put_when_the_pull_fails(calls, monkeypatch):
+    failing(calls, monkeypatch, cli.PULL, "fatal: couldn't find remote ref main")
+    result = oo("new", "-b", "pr-123-branch")
+    assert isinstance(result.exception, Called)
     assert "rather than checking out pr-123-branch" in result.output
-    assert calls == [CREATE, PULL, PP, PP, CONNECT]
+    assert calls == [CREATE, PULL, CONNECT]
 
 
 def test_new_carries_on_when_the_checkout_fails(calls, monkeypatch):

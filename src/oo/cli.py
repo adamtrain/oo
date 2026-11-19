@@ -630,7 +630,7 @@ def new(
             "--branch",
             "-b",
             help="Branch to switch to once it's set up, before it connects: one on GitHub, or "
-            "a new one like [bold]adam/fde-123[/]. Skipped, with a warning, if setting up fails.",
+            "a new one like [bold]adam/fde-123[/]. Skipped, with a warning, if the pull fails.",
             show_default=False,
         ),
     ] = None,
@@ -716,9 +716,15 @@ def new(
         )
     if gh_hosts:
         _copy_gh_hosts_to_new(created)
-    ready = _set_up(created, f"created in {render.duration(took)}")
+    render.heading(
+        err, "Setting up", created, branch_prefix(), f"created in {render.duration(took)}"
+    )
     note = ""
-    if branch and ready:
+    # A new branch starts from wherever the environment is, so it waits on the pull alone.
+    on_latest = _pull(created)
+    if on_latest:
+        _prepare(created)
+    if branch and on_latest:
         _check_out(created, branch)
     elif branch:
         render.warning(err, f"Left it on the default branch rather than checking out {branch}.")
@@ -758,14 +764,16 @@ def _open_in_editor(env: Env, editor: str | None, note: str = "") -> None:
         _cancelled()
 
 
-def _run_in(env: Env, doing: str, script: str, *, timeout: int, failed: str) -> str | None:
+def _run_in(
+    env: Env, doing: str, script: str, *, timeout: int, failed: str
+) -> tuple[float, str] | None:
     """Run a shell script in `env`'s repo, behind a spinner with a timer.
 
-    Returns what it printed, or None after warning that it failed.
+    Returns how many seconds it took and what it printed, or None after warning that it failed.
     """
     try:
         with err.status(render.working(doing), spinner_style=render.ACCENT) as status:
-            _, output = ona.quietly(
+            return ona.quietly(
                 "environment",
                 "exec",
                 env.id,
@@ -784,7 +792,6 @@ def _run_in(env: Env, doing: str, script: str, *, timeout: int, failed: str) -> 
         return None
     except KeyboardInterrupt:
         _cancelled()
-    return output
 
 
 # What every new environment gets before you're let in: the latest main, then the repo's own
@@ -796,42 +803,42 @@ PULL_TIMEOUT = 600
 PREPARE_TIMEOUT = 1800
 
 
-def _set_up(env: Env, note: str = "") -> bool:
-    """Run PULL then PREPARE in `env`, and carry on. Returns whether both worked.
-
-    A failure only gets a warning. PREPARE gets a second go if its first fails, and no more.
-    """
-    both = f"{PULL} && {PREPARE}"
-    render.heading(err, "Setting up", env, branch_prefix(), ", ".join(n for n in (note, both) if n))
-    pulled = _run_in(
+def _pull(env: Env) -> bool:
+    """Run PULL in `env`, and say how it went. Returns whether it worked."""
+    done = _run_in(
         env,
         f"Running {PULL}…",
         PULL,
         timeout=PULL_TIMEOUT,
-        failed=f"Couldn't run {PULL} in the environment, so left out {PREPARE} too.",
+        failed=f"{PULL} failed in the environment, so left out {PREPARE} too.",
     )
-    if pulled is None:
+    if done is None:
         return False
-    first = _run_in(
+    render.success(err, f"Ran {PULL}", f"in {render.duration(done[0])}")
+    return True
+
+
+def _prepare(env: Env) -> None:
+    """Run PREPARE in `env`, and say how it went. A first failure gets it one more go."""
+    done = _run_in(
         env,
         f"Running {PREPARE}…",
         PREPARE,
         timeout=PREPARE_TIMEOUT,
         failed=f"{PREPARE} failed in the environment. Trying it once more.",
     )
-    if first is not None:
-        return True
-    second = _run_in(
-        env,
-        f"Running {PREPARE} again…",
-        PREPARE,
-        timeout=PREPARE_TIMEOUT,
-        failed=f"{PREPARE} failed again in the environment, so that's left for you.",
-    )
-    if second is None:
-        return False
-    render.success(err, f"{PREPARE} worked the second time")
-    return True
+    again = ""
+    if done is None:
+        again = ", on the second try"
+        done = _run_in(
+            env,
+            f"Running {PREPARE} again…",
+            PREPARE,
+            timeout=PREPARE_TIMEOUT,
+            failed=f"{PREPARE} failed again in the environment, so that's left for you.",
+        )
+    if done is not None:
+        render.success(err, f"Ran {PREPARE}", f"in {render.duration(done[0])}{again}")
 
 
 # What the checkout prints when it had to start the branch, for want of one on GitHub.
@@ -870,14 +877,14 @@ def _check_out(env: Env, branch: str, note: str = "") -> None:
     render.heading(
         err, "Checking out", env, branch_prefix(), ", ".join(n for n in (note, branch) if n)
     )
-    output = _run_in(
+    done = _run_in(
         env,
         f"Checking out {branch}…",
         check_out_script(branch),
         timeout=CHECK_OUT_TIMEOUT,
         failed=f"Ona couldn't check out {branch}.",
     )
-    if output and NEW_BRANCH in output:
+    if done and NEW_BRANCH in done[1]:
         render.success(err, f"Started {branch} as a new branch", "GitHub doesn't have one yet")
 
 
