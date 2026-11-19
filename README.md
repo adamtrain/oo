@@ -83,7 +83,7 @@ oo claude login --label Login # …and call it Login in the app's SSH picker
 oo claude --clean             # take deleted environments out of the app's SSH connections
 oo cp notes.md dist login:    # copy files and folders into the repo on adam/login-fix
 oo cp login:out/report.csv .  # …or out of it
-oo new                        # create an environment, set it up and SSH into it
+oo new                        # create an environment, pull main and SSH into it
 oo new -n login-fix           # …named login-fix, so oo c login-fix finds it
 oo new -b adam/fde-123        # …switch to that branch, starting it if GitHub has none
 oo new -t open,ssh            # …open it in your editor, then SSH into it
@@ -166,26 +166,17 @@ time. To choose, use the options or set them in your shell profile:
 
 Class words prefer the classes the project offers, the same choices as Ona's region picker.
 
-Once Ona has started the environment, oo sets it up by running `git pull origin main` and then
-`just pp` in its repo. It does this for every new environment, with nothing to turn on, and each
-gets its own line saying whether it worked and how long it took:
-
-```console
-→ Setting up main · created in 3m 02s
-✓ Ran git pull origin main in 4s
-! just pp failed in the environment. Trying it once more.
-  error: Recipe `pp` failed on line 12 with exit code 1
-✓ Ran just pp in 1m 20s, on the second try
-```
-
-If `just pp` fails, oo runs it once more, and no more than that. If the pull fails, oo leaves
-`just pp` out. Either way it shows what went wrong and carries on, so you still get connected.
+Once Ona has started the environment, oo runs `git pull origin main` in its repo, so you start
+from the latest `main`. It does this for every new environment, with nothing to turn on, and
+says whether it worked and how long it took. If the pull fails, oo shows what went wrong and
+carries on, so you still get connected. Anything else the repo needs after a pull, like
+`just pp`, is yours to run once you're in.
 
 With `-b`, oo then switches to that branch. If GitHub has the branch, you get it, tracking
 GitHub's. If not, oo starts a new branch of that name from the `main` it just pulled, and tells
-you it did. The switch only needs the pull to have worked, so that a new branch starts from the
-latest `main`; it goes ahead even if `just pp` failed. If the pull failed, oo leaves the
-environment on the project's default branch and says so. After all that, oo connects to it.
+you it did. The switch only happens once the pull has worked, so that a new branch starts from
+the latest `main`. If the pull failed, oo leaves the environment on the project's default branch
+and says so. After all that, oo connects to it.
 
 To have `gh` signed in on each new environment as it is on your machine, set `OO_GH_HOSTS=1` in
 your shell profile. `oo new` then copies your `~/.config/gh/hosts.yml` to the same place in the
@@ -255,10 +246,9 @@ them. If the app is open, quit and reopen it to see the list update.
 
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
 that wasn't there before. It then runs `git pull origin main` in the repo with
-`ona environment exec`, and `just pp` with another, giving that up to 30 minutes and a second
-try if the first fails. With `-b BRANCH`, one more `exec` asks `git ls-remote` whether GitHub has
-the branch, then fetches it and runs `git switch`, or runs `git switch -c` to start it. If any
-step fails, oo warns and carries on.
+`ona environment exec`. With `-b BRANCH`, a second `exec` asks `git ls-remote` whether GitHub
+has the branch, then fetches it and runs `git switch`, or runs `git switch -c` to start it. If
+either step fails, oo warns and carries on.
 
 `oo gh-hosts`, and `oo new` with `OO_GH_HOSTS` set, set up SSH as `oo cp` does, then send
 `hosts.yml` down a single `ssh` connection that makes `~/.config/gh` and writes the file so only

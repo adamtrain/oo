@@ -720,10 +720,8 @@ def new(
         err, "Setting up", created, branch_prefix(), f"created in {render.duration(took)}"
     )
     note = ""
-    # A new branch starts from wherever the environment is, so it waits on the pull alone.
+    # A new branch starts from wherever the environment is, so it waits on the pull.
     on_latest = _pull(created)
-    if on_latest:
-        _prepare(created)
     if branch and on_latest:
         _check_out(created, branch)
     elif branch:
@@ -794,13 +792,10 @@ def _run_in(
         _cancelled()
 
 
-# What every new environment gets before you're let in: the latest main, then the repo's own
-# `just pp` to bring everything else in line with it.
+# What every new environment gets before you're let in: the latest main.
 PULL = "git pull origin main"
-PREPARE = "just pp"
-# Seconds to give each: more than ona's default of 120, and far more where there's a lot to build.
+# Seconds to give it: more than ona's default of 120, for big repos.
 PULL_TIMEOUT = 600
-PREPARE_TIMEOUT = 1800
 
 
 def _pull(env: Env) -> bool:
@@ -810,35 +805,12 @@ def _pull(env: Env) -> bool:
         f"Running {PULL}…",
         PULL,
         timeout=PULL_TIMEOUT,
-        failed=f"{PULL} failed in the environment, so left out {PREPARE} too.",
+        failed=f"{PULL} failed in the environment.",
     )
     if done is None:
         return False
     render.success(err, f"Ran {PULL}", f"in {render.duration(done[0])}")
     return True
-
-
-def _prepare(env: Env) -> None:
-    """Run PREPARE in `env`, and say how it went. A first failure gets it one more go."""
-    done = _run_in(
-        env,
-        f"Running {PREPARE}…",
-        PREPARE,
-        timeout=PREPARE_TIMEOUT,
-        failed=f"{PREPARE} failed in the environment. Trying it once more.",
-    )
-    again = ""
-    if done is None:
-        again = ", on the second try"
-        done = _run_in(
-            env,
-            f"Running {PREPARE} again…",
-            PREPARE,
-            timeout=PREPARE_TIMEOUT,
-            failed=f"{PREPARE} failed again in the environment, so that's left for you.",
-        )
-    if done is not None:
-        render.success(err, f"Ran {PREPARE}", f"in {render.duration(done[0])}{again}")
 
 
 # What the checkout prints when it had to start the branch, for want of one on GitHub.
