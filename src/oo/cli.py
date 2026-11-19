@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
@@ -29,6 +30,8 @@ app = typer.Typer(
 
 ACTIVE = ("running", "starting", "creating", "updating")
 NO_ENVS_HINT = "Create one with [bold]ona environment create <repo-url>[/]."
+GH_HOSTS_VAR = "OO_GH_HOSTS"
+GH_HOSTS = ".config/gh/hosts.yml"  # where the GitHub CLI keeps its logins, under home
 
 
 def _fail(message: str, *, detail: str | None = None, hint: str | None = None) -> NoReturn:
@@ -257,6 +260,7 @@ EPILOG = (
     "  [cyan]oo cp notes.md login:[/]        copy a file into its repo\n"
     "  [cyan]oo cp login:out.csv .[/]        …or out of it\n"
     "  [cyan]oo new[/]                       create an environment and connect to it\n"
+    "  [cyan]oo gh-hosts --all[/]            sign gh in on every running one, as it is here\n"
     "  [cyan]oo new -b pr-9[/]               …check out branch pr-9 first\n"
     "  [cyan]oo new -t open,ssh[/]           …open it in your editor, then connect\n"
     "  [cyan]oo stop --all[/]                stop everything that's running\n"
@@ -338,6 +342,90 @@ def _set_up_ssh(env: Env) -> None:
     except ssh.SshError as e:
         _fail(str(e), hint=e.hint)
     render.success(err, "Set up SSH for Ona environments", "with ona environment ssh-config")
+
+
+def _gh_hosts_file() -> Path | None:
+    """Where your GitHub CLI logins are on this machine, if you have any."""
+    path = Path.home() / GH_HOSTS
+    return path if path.is_file() else None
+
+
+def _send_gh_hosts(env: Env, source: Path) -> None:
+    """Write your GitHub CLI logins into `env`, so gh there is signed in as it is here.
+
+    Raises ssh.SshError if they don't get there.
+    """
+    _set_up_ssh(env)
+    doing = f"Copying GitHub CLI logins to {render.names([env])}…"
+    try:
+        with err.status(render.working(doing), spinner_style=render.ACCENT):
+            ssh.put_in_home(env.id, source, GH_HOSTS)
+    except KeyboardInterrupt:
+        _cancelled()
+
+
+def _copy_gh_hosts_to_new(env: Env) -> None:
+    """Copy your GitHub CLI logins into an environment `oo new` just made.
+
+    A copy that fails gets a warning rather than keeping you out of a new environment.
+    """
+    source = _gh_hosts_file()
+    if not source:
+        render.warning(err, "No GitHub CLI logins to copy.", detail=f"~/{GH_HOSTS} doesn't exist.")
+        return
+    try:
+        _send_gh_hosts(env, source)
+    except ssh.SshError as e:
+        render.warning(err, f"Couldn't copy your GitHub CLI logins. {e}", detail=e.hint)
+        return
+    render.success(err, "Copied your GitHub CLI logins", f"to ~/{GH_HOSTS}")
+
+
+@app.command("gh-hosts")
+def gh_hosts_(
+    branches: MaybeBranches = None,
+    everything: Annotated[
+        bool, typer.Option("--all", "-a", help="Copy them to every running one.")
+    ] = False,
+) -> None:
+    """Copy your GitHub CLI logins into environments, so gh is signed in there too.
+
+    With no branch, copies to the only running one. Replaces the environment's
+    ~/.config/gh/hosts.yml with yours, starting a stopped environment first.
+    """
+    source = _gh_hosts_file()
+    if not source:
+        _fail(
+            "No GitHub CLI logins to copy.",
+            detail=f"~/{GH_HOSTS} doesn't exist.",
+            hint="Log in with [bold]gh auth login[/] first.",
+        )
+    if everything and branches:
+        _fail("--all copies to every running environment, so it takes no branch.")
+    envs = _load()
+    if everything:
+        targets = [e for e in envs if e.running]
+        if not targets:
+            render.success(err, "Nothing is running.")
+            return
+    elif branches:
+        targets = _find_all(envs, branches)
+    else:
+        targets = [_choose(envs, None, "copy to")]
+    failures = 0
+    for env in targets:
+        label = render.names([env])
+        started = _start_if_stopped(env)
+        try:
+            _send_gh_hosts(env, source)
+        except ssh.SshError as e:
+            failures += 1
+            render.warning(err, f"Couldn't copy your GitHub CLI logins to {label}. {e}", e.hint)
+            continue
+        note = f"to {label}" + (f", {started}" if started else "")
+        render.success(err, "Copied your GitHub CLI logins", note)
+    if failures:
+        raise typer.Exit(1)
 
 
 def _forget_in_claude(stale: Callable[[str], bool], *, quiet: bool = False) -> None:
@@ -559,6 +647,15 @@ def new(
         ),
     ] = None,
     editor: Editor = None,
+    gh_hosts: Annotated[
+        bool,
+        typer.Option(
+            "--gh-hosts/--no-gh-hosts",
+            envvar=GH_HOSTS_VAR,
+            help=f"Copy your GitHub CLI logins, [bold]~/{GH_HOSTS}[/], into it, so gh is signed "
+            "in there too.",
+        ),
+    ] = False,
 ) -> None:
     """Create an environment, then connect to it or open it (see [bold]--then[/])."""
     name = (name or "").strip()
@@ -616,6 +713,8 @@ def new(
             "Ona created it, but I can't tell which environment is yours to connect.",
             hint="Run [bold]oo[/] to look.",
         )
+    if gh_hosts:
+        _copy_gh_hosts_to_new(created)
     note = f"created in {render.duration(took)}"
     if branch:
         _check_out(created, branch, note)

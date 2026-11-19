@@ -89,6 +89,8 @@ oo new -b pr-9                # …check out branch pr-9, then SSH into it
 oo new -t open,ssh            # …open it in your editor, then SSH into it
 oo new -t claude              # …open it in the Claude desktop app instead
 oo new -t none                # …just create it
+oo gh-hosts login             # sign gh in on it, with your GitHub CLI logins from this machine
+oo gh-hosts --all             # …on every running one
 oo start login billing        # warm some up in the background
 oo stop                       # stop the only running one (--all for every one)
 oo rm old-spike               # delete one
@@ -158,9 +160,29 @@ time. To choose, use the options or set them in your shell profile:
 | **Project** | `-p, --project` | `OO_PROJECT` | An ID or name from `ona project list` |
 | **Class** | `-c, --class` | `OO_CLASS` | An ID from `ona environment list-classes`, or words that pick one out, like `frankfurt` or `tokyo m7i` |
 | **Name** | `-n, --name` | | Up to 80 characters. oo finds it by this name, as it does by branch |
+| **GitHub CLI logins** | `--gh-hosts` | `OO_GH_HOSTS` | Nothing as an option, `1` as a variable. Off unless you ask |
 
 Class words prefer the classes the project offers, the same choices as Ona's region picker. Once
 Ona has started the environment, oo connects to it. It starts on the project's default branch.
+
+To have `gh` signed in on each new environment as it is on your machine, set `OO_GH_HOSTS=1` in
+your shell profile. `oo new` then copies your `~/.config/gh/hosts.yml` to the same place in the
+environment before connecting, making the folder if it isn't there. `--gh-hosts` does it for one
+environment, and `--no-gh-hosts` skips it for one. If the copy fails, oo says so and connects
+anyway. That file can hold your GitHub tokens, so only turn this on for environments you'd trust
+with them. If `gh` keeps your token in your system's keychain instead, the file has no token in
+it, and `gh` in the environment will still ask you to log in.
+
+For environments you already have, `oo gh-hosts` does the same copy whenever you like, say after
+logging in again on your machine. It replaces the environment's `hosts.yml` with yours:
+
+```sh
+oo gh-hosts                   # the only running environment, or pick from a list
+oo gh-hosts login billing     # the ones you name, starting any that are stopped
+oo gh-hosts --all             # every running one, leaving stopped ones stopped
+```
+
+If one copy fails, oo says which, carries on with the rest, and exits with an error at the end.
 
 ## Settings
 
@@ -170,6 +192,7 @@ Ona has started the environment, oo connects to it. It starts on the project's d
 | `OO_EDITOR` | Default editor for `oo open` and `oo new -t open`: an alias from `ona environment list-editors`, like `cursor` |
 | `OO_PROJECT` | Default project for `oo new` |
 | `OO_CLASS` | Default environment class for `oo new` |
+| `OO_GH_HOSTS` | Set to `1` to have `oo new` copy your GitHub CLI logins, `~/.config/gh/hosts.yml`, into each new environment |
 
 ## How it works
 
@@ -212,6 +235,10 @@ them. If the app is open, quit and reopen it to see the list update.
 that wasn't there before. With `-b BRANCH`, it first runs `ona environment exec` to fetch that
 branch and `git switch` to it. If that fails, oo warns and carries on.
 
+`oo gh-hosts`, and `oo new` with `OO_GH_HOSTS` set, set up SSH as `oo cp` does, then send
+`hosts.yml` down a single `ssh` connection that makes `~/.config/gh` and writes the file so only
+you can read it.
+
 ## Development
 
 ```sh
@@ -230,7 +257,7 @@ src/oo/
 ├── projects.py  # choosing a project and environment class for `oo new`
 ├── ona.py       # runs the ona CLI
 ├── github.py    # asks GitHub about branches through gh
-├── ssh.py       # copies files with scp, for `oo cp`
+├── ssh.py       # copies files over ssh and scp, for `oo cp`, `oo new` and `oo gh-hosts`
 ├── claude.py    # hands an environment to the Claude desktop app, for `oo claude`
 └── render.py    # everything you see
 docs/

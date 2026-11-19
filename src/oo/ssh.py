@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 import posixpath
+import shlex
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import NoReturn
 
 
@@ -69,6 +71,34 @@ def configured(env_id: str) -> bool:
         or settings.get("proxycommand", "none") != "none"
         or settings.get("proxyjump", "none") != "none"
     )
+
+
+def put_in_home(env_id: str, source: Path, dest: str, timeout: float = 60) -> None:
+    """Write the local file `source` to `dest` in the environment's home folder, private to you.
+
+    It goes down ssh's stdin rather than through scp, so that one connection can make the folder,
+    write the file and keep it from other users.
+    """
+    folder = '"$HOME"/' + shlex.quote(posixpath.dirname(dest))
+    target = '"$HOME"/' + shlex.quote(dest)
+    command = f"mkdir -p {folder} && umask 077 && cat > {target} && chmod 600 {target}"
+    try:
+        with source.open("rb") as stdin:
+            done = subprocess.run(
+                [binary("ssh"), "-o", "BatchMode=yes", host(env_id), command],
+                stdin=stdin,
+                capture_output=True,
+                timeout=timeout,
+            )
+    except OSError as e:
+        raise SshError(f"Couldn't read {source}.", hint=e.strerror) from e
+    except subprocess.TimeoutExpired as e:
+        raise SshError("The environment took too long to answer over SSH.") from e
+    if done.returncode:
+        raise SshError(
+            "Couldn't write to the environment over SSH.",
+            hint=done.stderr.decode(errors="replace").strip() or None,
+        )
 
 
 def replace_with_scp(*args: str) -> NoReturn:

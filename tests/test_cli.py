@@ -480,6 +480,130 @@ def test_new_names_the_environment(calls):
     assert calls[0] == ("environment", "create", "p-1", "--class-id", "c-fr", "--name", "login-fix")
 
 
+@pytest.fixture
+def gh_hosts(calls, monkeypatch, tmp_path):
+    """A home folder with GitHub CLI logins in it, and a fake copy that records where they go."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = tmp_path / ".config" / "gh" / "hosts.yml"
+    path.parent.mkdir(parents=True)
+    path.write_text("github.com:\n    user: sam\n")
+    monkeypatch.setattr(
+        ssh, "put_in_home", lambda env_id, source, dest: calls.append(("put", env_id, source, dest))
+    )
+    return path
+
+
+def test_new_keeps_your_gh_logins_to_itself_unless_asked(calls, gh_hosts):
+    oo("new")
+    assert [c[0] for c in calls] == ["environment", "environment"]
+
+
+def test_new_copies_your_gh_logins_before_connecting(calls, gh_hosts):
+    result = oo("new", "--gh-hosts")
+    assert "Copied your GitHub CLI logins to ~/.config/gh/hosts.yml" in result.output
+    assert calls[1:] == [
+        ("put", "99999999-new", gh_hosts, ".config/gh/hosts.yml"),
+        ("environment", "ssh", "99999999-new"),
+    ]
+
+
+def test_new_copies_gh_logins_every_time_once_the_variable_is_set(calls, gh_hosts, monkeypatch):
+    monkeypatch.setenv("OO_GH_HOSTS", "1")
+    oo("new")
+    assert calls[1][0] == "put"
+
+
+def test_new_can_skip_copying_gh_logins_for_once(calls, gh_hosts, monkeypatch):
+    monkeypatch.setenv("OO_GH_HOSTS", "1")
+    oo("new", "--no-gh-hosts")
+    assert [c[0] for c in calls] == ["environment", "environment"]
+
+
+def test_new_sets_up_ssh_before_copying_gh_logins(calls, gh_hosts, monkeypatch):
+    answers = iter([False, True])
+    monkeypatch.setattr(ssh, "configured", lambda env_id: next(answers))
+    oo("new", "--gh-hosts")
+    assert [c[:2] for c in calls[1:3]] == [("environment", "ssh-config"), ("put", "99999999-new")]
+
+
+def test_new_connects_anyway_without_gh_logins_to_copy(calls, gh_hosts):
+    gh_hosts.unlink()
+    result = oo("new", "--gh-hosts")
+    assert "No GitHub CLI logins to copy." in result.output
+    assert calls[1:] == [("environment", "ssh", "99999999-new")]
+
+
+def test_new_connects_anyway_when_gh_logins_wont_copy(calls, gh_hosts, monkeypatch):
+    def put_in_home(env_id, source, dest):
+        raise ssh.SshError("Couldn't write to the environment over SSH.", hint="Permission denied")
+
+    monkeypatch.setattr(ssh, "put_in_home", put_in_home)
+    result = oo("new", "--gh-hosts")
+    assert "Couldn't copy your GitHub CLI logins." in result.output
+    assert "Permission denied" in result.output
+    assert calls[1:] == [("environment", "ssh", "99999999-new")]
+
+
+def test_gh_hosts_copies_to_the_only_running_one(calls, gh_hosts):
+    result = oo("gh-hosts")
+    assert "Copied your GitHub CLI logins to sam/feat-10" in result.output
+    assert calls == [("put", "11111111-aaaa", gh_hosts, ".config/gh/hosts.yml")]
+
+
+def test_gh_hosts_starts_stopped_ones_you_name(calls, gh_hosts):
+    result = oo("gh-hosts", "docs", "feat-10")
+    assert "to sam/docs, started in 3s" in result.output
+    assert calls == [
+        ("environment", "start", "33333333-cccc"),
+        ("put", "33333333-cccc", gh_hosts, ".config/gh/hosts.yml"),
+        ("put", "11111111-aaaa", gh_hosts, ".config/gh/hosts.yml"),
+    ]
+
+
+def test_gh_hosts_all_copies_to_every_running_one_and_no_others(calls, gh_hosts, envs):
+    envs.append(Env.from_json(raw_env("44444444-dddd", "sam/billing", "running")))
+    result = oo("gh-hosts", "--all")
+    assert result.exit_code == 0
+    assert sorted(c[:2] for c in calls) == [("put", "11111111-aaaa"), ("put", "44444444-dddd")]
+
+
+def test_gh_hosts_all_says_when_nothing_is_running(calls, gh_hosts, envs):
+    del envs[0]
+    result = oo("gh-hosts", "--all")
+    assert "Nothing is running." in result.output
+    assert calls == []
+
+
+def test_gh_hosts_all_takes_no_branch(calls, gh_hosts):
+    result = oo("gh-hosts", "--all", "docs")
+    assert result.exit_code == 1
+    assert calls == []
+
+
+def test_gh_hosts_needs_logins_to_copy(calls, gh_hosts):
+    gh_hosts.unlink()
+    result = oo("gh-hosts", "--all")
+    assert result.exit_code == 1
+    assert "No GitHub CLI logins to copy." in result.output
+    assert calls == []
+
+
+def test_gh_hosts_carries_on_past_one_that_fails_then_says_so(calls, gh_hosts, monkeypatch, envs):
+    envs.append(Env.from_json(raw_env("44444444-dddd", "sam/billing", "running")))
+
+    def put_in_home(env_id, source, dest):
+        if env_id == "11111111-aaaa":
+            raise ssh.SshError("Couldn't write to the environment over SSH.", hint="Broken pipe")
+        calls.append(("put", env_id))
+
+    monkeypatch.setattr(ssh, "put_in_home", put_in_home)
+    result = oo("gh-hosts", "--all")
+    assert result.exit_code == 1
+    assert "Couldn't copy your GitHub CLI logins to sam/feat-10." in result.output
+    assert "Broken pipe" in result.output
+    assert calls == [("put", "44444444-dddd")]
+
+
 def test_new_refuses_names_ona_wont_take(calls):
     result = oo("new", "-n", "x" * 81)
     assert result.exit_code == 1
