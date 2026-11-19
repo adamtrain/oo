@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import shlex
 import sys
 import time
 from collections.abc import Callable
@@ -628,8 +629,8 @@ def new(
         typer.Option(
             "--branch",
             "-b",
-            help="Branch to check out once it's ready, before it connects. "
-            "If the checkout fails, oo warns and carries on.",
+            help="Branch to switch to once it's set up, before it connects: one on GitHub, or "
+            "a new one like [bold]adam/fde-123[/]. Skipped, with a warning, if setting up fails.",
             show_default=False,
         ),
     ] = None,
@@ -715,10 +716,12 @@ def new(
         )
     if gh_hosts:
         _copy_gh_hosts_to_new(created)
-    note = f"created in {render.duration(took)}"
-    if branch:
-        _check_out(created, branch, note)
-        note = ""
+    ready = _set_up(created, f"created in {render.duration(took)}")
+    note = ""
+    if branch and ready:
+        _check_out(created, branch)
+    elif branch:
+        render.warning(err, f"Left it on the default branch rather than checking out {branch}.")
     if steps == ["none"]:
         render.success(err, f"Created {render.names([created])}", note)
         return
@@ -755,11 +758,81 @@ def _open_in_editor(env: Env, editor: str | None, note: str = "") -> None:
         _cancelled()
 
 
-# Fetch the branch by name, so it works on shallow and single-branch clones too, then switch to
-# it. The branch comes in as $1 rather than in the script, so it needs no quoting.
-CHECK_OUT = 'git fetch origin "$1:refs/remotes/origin/$1" && git switch "$1"'
+def _run_in(env: Env, doing: str, script: str, *, timeout: int, failed: str) -> str | None:
+    """Run a shell script in `env`'s repo, behind a spinner with a timer.
+
+    Returns what it printed, or None after warning that it failed.
+    """
+    try:
+        with err.status(render.working(doing), spinner_style=render.ACCENT) as status:
+            _, output = ona.quietly(
+                "environment",
+                "exec",
+                env.id,
+                "--timeout",
+                str(timeout),
+                *(["--working-dir", env.checkout] if env.checkout else []),
+                "--",
+                # ona joins what follows with spaces and hands it to sh, so the script goes as
+                # one argument, and can't be given arguments of its own.
+                script,
+                failed=failed,
+                on_tick=lambda s: status.update(render.working(doing, s)),
+            )
+    except OnaError as e:
+        render.warning(err, str(e), detail=e.detail)
+        return None
+    except KeyboardInterrupt:
+        _cancelled()
+    return output
+
+
+# What every new environment gets before you're let in: the latest main, then the repo's own
+# `just pp` to bring everything else in line with it.
+SET_UP = "git pull origin main && just pp"
+# Seconds to give it: far more than ona's default of 120, since it can have a lot to build.
+SET_UP_TIMEOUT = 1800
+
+
+def _set_up(env: Env, note: str = "") -> bool:
+    """Run SET_UP in `env`, and carry on. Only warns if it fails, and returns whether it worked."""
+    render.heading(
+        err, "Setting up", env, branch_prefix(), ", ".join(n for n in (note, SET_UP) if n)
+    )
+    output = _run_in(
+        env,
+        f"Running {SET_UP}…",
+        SET_UP,
+        timeout=SET_UP_TIMEOUT,
+        failed=f"Couldn't run {SET_UP} in the environment.",
+    )
+    return output is not None
+
+
+# What the checkout prints when it had to start the branch, for want of one on GitHub.
+NEW_BRANCH = "oo: new branch"
 # Seconds to give the fetch and switch: more than ona's default of 120, for big repos.
-CHECK_OUT_TIMEOUT = "600"
+CHECK_OUT_TIMEOUT = 600
+
+
+def check_out_script(branch: str) -> str:
+    """The shell that switches to `branch`: GitHub's if it has one, else a new one from here.
+
+    ls-remote exits with 2 when GitHub has no such branch, and that alone starts a new one, so
+    not reaching GitHub is a failure. An existing branch is fetched by name, and its switch
+    retried once git has been told to track it, so it works on single-branch clones too.
+    """
+    b = shlex.quote(branch)
+    return (
+        f"git ls-remote --exit-code --heads origin refs/heads/{b} >/dev/null; "
+        "case $? in "
+        f"0) git fetch origin {b}:refs/remotes/origin/{b} && "
+        f"{{ git switch {b} 2>/dev/null || "
+        f"{{ git remote set-branches --add origin {b} && git switch {b}; }}; }} ;; "
+        f"2) git switch -c {b} && echo {shlex.quote(NEW_BRANCH)} ;; "
+        "*) exit 1 ;; "
+        "esac"
+    )
 
 
 def safe_branch(branch: str) -> bool:
@@ -768,31 +841,19 @@ def safe_branch(branch: str) -> bool:
 
 
 def _check_out(env: Env, branch: str, note: str = "") -> None:
-    """Have ona check `branch` out in `env`, and carry on. Only warns if it can't."""
+    """Have ona switch `env` to `branch`, and carry on. Only warns if it can't."""
     render.heading(
         err, "Checking out", env, branch_prefix(), ", ".join(n for n in (note, branch) if n)
     )
-    try:
-        with err.status(render.working(f"Checking out {branch}…"), spinner_style=render.ACCENT):
-            ona.quietly(
-                "environment",
-                "exec",
-                env.id,
-                "--timeout",
-                CHECK_OUT_TIMEOUT,
-                *(["--working-dir", env.checkout] if env.checkout else []),
-                "--",
-                "sh",
-                "-c",
-                CHECK_OUT,
-                "sh",
-                branch,
-                failed=f"Ona couldn't check out {branch}.",
-            )
-    except OnaError as e:
-        render.warning(err, str(e), detail=e.detail)
-    except KeyboardInterrupt:
-        _cancelled()
+    output = _run_in(
+        env,
+        f"Checking out {branch}…",
+        check_out_script(branch),
+        timeout=CHECK_OUT_TIMEOUT,
+        failed=f"Ona couldn't check out {branch}.",
+    )
+    if output and NEW_BRANCH in output:
+        render.success(err, f"Started {branch} as a new branch", "GitHub doesn't have one yet")
 
 
 @app.command()

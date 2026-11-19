@@ -83,9 +83,9 @@ oo claude login --label Login # …and call it Login in the app's SSH picker
 oo claude --clean             # take deleted environments out of the app's SSH connections
 oo cp notes.md dist login:    # copy files and folders into the repo on adam/login-fix
 oo cp login:out/report.csv .  # …or out of it
-oo new                        # create an environment and SSH into it
+oo new                        # create an environment, set it up and SSH into it
 oo new -n login-fix           # …named login-fix, so oo c login-fix finds it
-oo new -b pr-9                # …check out branch pr-9, then SSH into it
+oo new -b adam/fde-123        # …switch to that branch, starting it if GitHub has none
 oo new -t open,ssh            # …open it in your editor, then SSH into it
 oo new -t claude              # …open it in the Claude desktop app instead
 oo new -t none                # …just create it
@@ -162,8 +162,18 @@ time. To choose, use the options or set them in your shell profile:
 | **Name** | `-n, --name` | | Up to 80 characters. oo finds it by this name, as it does by branch |
 | **GitHub CLI logins** | `--gh-hosts` | `OO_GH_HOSTS` | Nothing as an option, `1` as a variable. Off unless you ask |
 
-Class words prefer the classes the project offers, the same choices as Ona's region picker. Once
-Ona has started the environment, oo connects to it. It starts on the project's default branch.
+| **Branch** | `-b, --branch` | | A branch on GitHub, or a new one to start, like `adam/fde-123` |
+
+Class words prefer the classes the project offers, the same choices as Ona's region picker.
+
+Once Ona has started the environment, oo sets it up by running `git pull origin main && just pp`
+in its repo. It does this for every new environment, with nothing to turn on. If that fails, oo
+shows what went wrong and carries on, so you still get connected.
+
+With `-b`, oo then switches to that branch. If GitHub has the branch, you get it, tracking
+GitHub's. If not, oo starts a new branch of that name from the `main` it just pulled, and tells
+you it did. The switch only happens once the setup has worked: if it failed, oo leaves the
+environment on the project's default branch and says so. After all that, oo connects to it.
 
 To have `gh` signed in on each new environment as it is on your machine, set `OO_GH_HOSTS=1` in
 your shell profile. `oo new` then copies your `~/.config/gh/hosts.yml` to the same place in the
@@ -232,8 +242,10 @@ app's `ssh_configs.json`, and only touch connections to environments (`*.claude.
 them. If the app is open, quit and reopen it to see the list update.
 
 `oo new` notes which environments exist, runs `ona environment create`, and connects to the one
-that wasn't there before. With `-b BRANCH`, it first runs `ona environment exec` to fetch that
-branch and `git switch` to it. If that fails, oo warns and carries on.
+that wasn't there before. It then runs `git pull origin main && just pp` in the repo with
+`ona environment exec`, giving it up to 30 minutes. With `-b BRANCH`, a second `exec` asks
+`git ls-remote` whether GitHub has the branch, then fetches it and runs `git switch`, or runs
+`git switch -c` to start it. If either step fails, oo warns and carries on.
 
 `oo gh-hosts`, and `oo new` with `OO_GH_HOSTS` set, set up SSH as `oo cp` does, then send
 `hosts.yml` down a single `ssh` connection that makes `~/.config/gh` and writes the file so only
