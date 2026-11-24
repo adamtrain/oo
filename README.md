@@ -91,6 +91,8 @@ oo new -t claude              # …open it in the Claude desktop app instead
 oo new -t none                # …just create it
 oo gh-hosts login             # sign gh in on it, with your GitHub CLI logins from this machine
 oo gh-hosts --all             # …on every running one
+oo bk-token login             # sign bk in on it, with your Buildkite CLI token from this machine
+oo bk-token --all             # …on every running one
 oo start login billing        # warm some up in the background
 oo stop                       # stop the only running one (--all for every one)
 oo rm old-spike               # delete one
@@ -161,6 +163,7 @@ time. To choose, use the options or set them in your shell profile:
 | **Class** | `-c, --class` | `OO_CLASS` | An ID from `ona environment list-classes`, or words that pick one out, like `frankfurt` or `tokyo m7i` |
 | **Name** | `-n, --name` | | Up to 80 characters. oo finds it by this name, as it does by branch |
 | **GitHub CLI logins** | `--gh-hosts` | `OO_GH_HOSTS` | Nothing as an option, `1` as a variable. Off unless you ask |
+| **Buildkite CLI token** | `--bk-token` | `OO_BK_TOKEN` | Nothing as an option, `1` as a variable. Off unless you ask |
 
 | **Branch** | `-b, --branch` | | A branch on GitHub, or a new one to start, like `adam/fde-123` |
 
@@ -197,6 +200,25 @@ oo gh-hosts --all             # every running one, leaving stopped ones stopped
 
 If one copy fails, oo says which, carries on with the rest, and exits with an error at the end.
 
+`bk`, the Buildkite CLI, works the same way, with `OO_BK_TOKEN=1` in your shell profile, or
+`--bk-token` and `--no-bk-token` for one environment. It keeps its token in your system's
+keychain rather than a file, so oo asks `bk` on your machine for the token, then has `bk` in the
+environment sign in with it for the same organization. If either step fails, say because `bk`
+isn't installed in the environment, oo says so and connects anyway. Only turn this on for
+environments you'd trust with the token.
+
+The copy doesn't last as long as your login does. After `bk auth login` in a browser, the token
+expires about an hour after `bk` got it, and only your machine holds what renews it. oo says how
+long each copy has left. A token you made yourself and gave to `bk auth login --token` lasts as
+long as you set it to. Either way, `bk` there forgets it when the environment stops. `oo bk-token`
+copies the token again whenever you need it:
+
+```sh
+oo bk-token                   # the only running environment, or pick from a list
+oo bk-token login billing     # the ones you name, starting any that are stopped
+oo bk-token --all             # every running one, leaving stopped ones stopped
+```
+
 ## Settings
 
 | Variable | |
@@ -206,6 +228,7 @@ If one copy fails, oo says which, carries on with the rest, and exits with an er
 | `OO_PROJECT` | Default project for `oo new` |
 | `OO_CLASS` | Default environment class for `oo new` |
 | `OO_GH_HOSTS` | Set to `1` to have `oo new` copy your GitHub CLI logins, `~/.config/gh/hosts.yml`, into each new environment |
+| `OO_BK_TOKEN` | Set to `1` to have `oo new` copy your Buildkite CLI token into each new environment |
 
 ## How it works
 
@@ -254,6 +277,14 @@ either step fails, oo warns and carries on.
 `hosts.yml` down a single `ssh` connection that makes `~/.config/gh` and writes the file so only
 you can read it.
 
+`oo bk-token`, and `oo new` with `OO_BK_TOKEN` set, read your token, its organization and its
+expiry from `bk auth token --json`. The token goes down a single `ssh` connection's stdin to
+`bk auth login --org <org> --token <token>` in the environment, so it's never in a command line
+on your machine, and oo then asks `bk` there for the token back to check that it kept it. With
+no keychain in an environment, `bk` keeps the token in memory, under `/dev/shm`. oo leaves the
+refresh token that renews your login where it is: Buildkite replaces it each time it's used, so
+a copy would sign out whichever machine renewed second.
+
 ## Development
 
 ```sh
@@ -272,7 +303,8 @@ src/oo/
 ├── projects.py  # choosing a project and environment class for `oo new`
 ├── ona.py       # runs the ona CLI
 ├── github.py    # asks GitHub about branches through gh
-├── ssh.py       # copies files over ssh and scp, for `oo cp`, `oo new` and `oo gh-hosts`
+├── buildkite.py # reads your Buildkite token through bk, and signs bk in on an environment
+├── ssh.py       # copies files over ssh and scp, for `oo cp`, `oo new`, `oo gh-hosts` and `oo bk-token`
 ├── claude.py    # hands an environment to the Claude desktop app, for `oo claude`
 └── render.py    # everything you see
 docs/

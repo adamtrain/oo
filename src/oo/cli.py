@@ -15,7 +15,8 @@ import typer
 from rich.console import Console
 from rich.prompt import Confirm, IntPrompt
 
-from . import __version__, claude, github, ona, render, ssh
+from . import __version__, buildkite, claude, github, ona, render, ssh
+from .buildkite import BuildkiteError
 from .envs import PREFIX_VAR, Ambiguous, Env, NoMatch, branch_prefix, pick, sort_envs
 from .github import BranchStatus, GitHubError, NoGh
 from .ona import OnaError
@@ -33,6 +34,7 @@ ACTIVE = ("running", "starting", "creating", "updating")
 NO_ENVS_HINT = "Create one with [bold]ona environment create <repo-url>[/]."
 GH_HOSTS_VAR = "OO_GH_HOSTS"
 GH_HOSTS = ".config/gh/hosts.yml"  # where the GitHub CLI keeps its logins, under home
+BK_TOKEN_VAR = "OO_BK_TOKEN"
 
 
 def _fail(message: str, *, detail: str | None = None, hint: str | None = None) -> NoReturn:
@@ -262,6 +264,7 @@ EPILOG = (
     "  [cyan]oo cp login:out.csv .[/]        …or out of it\n"
     "  [cyan]oo new[/]                       create an environment and connect to it\n"
     "  [cyan]oo gh-hosts --all[/]            sign gh in on every running one, as it is here\n"
+    "  [cyan]oo bk-token --all[/]            …and bk, with a fresh Buildkite token\n"
     "  [cyan]oo new -b pr-9[/]               …check out branch pr-9 first\n"
     "  [cyan]oo new -t open,ssh[/]           …open it in your editor, then connect\n"
     "  [cyan]oo stop --all[/]                stop everything that's running\n"
@@ -401,32 +404,114 @@ def gh_hosts_(
             detail=f"~/{GH_HOSTS} doesn't exist.",
             hint="Log in with [bold]gh auth login[/] first.",
         )
+    targets = _copy_targets(branches, everything)
+    _copy_to_each(targets, "GitHub CLI logins", lambda env: _send_gh_hosts(env, source))
+
+
+def _copy_targets(branches: list[str] | None, everything: bool) -> list[Env]:
+    """The environments a copy goes to: every running one, the ones named, or the obvious one.
+
+    Says so and returns none when `everything` finds nothing running.
+    """
     if everything and branches:
         _fail("--all copies to every running environment, so it takes no branch.")
     envs = _load()
-    if everything:
-        targets = [e for e in envs if e.running]
-        if not targets:
-            render.success(err, "Nothing is running.")
-            return
-    elif branches:
-        targets = _find_all(envs, branches)
-    else:
-        targets = [_choose(envs, None, "copy to")]
+    if branches:
+        return _find_all(envs, branches)
+    if not everything:
+        return [_choose(envs, None, "copy to")]
+    running = [e for e in envs if e.running]
+    if not running:
+        render.success(err, "Nothing is running.")
+    return running
+
+
+def _copy_to_each(
+    targets: list[Env], what: str, send: Callable[[Env], None], also: str = ""
+) -> None:
+    """Copy `what` into each of `targets` with `send`, starting stopped ones first.
+
+    One that fails gets a warning, the rest still get theirs, and oo exits with an error at the
+    end. `also` is anything more to say about each copy that worked.
+    """
     failures = 0
     for env in targets:
         label = render.names([env])
         started = _start_if_stopped(env)
         try:
-            _send_gh_hosts(env, source)
+            send(env)
         except ssh.SshError as e:
             failures += 1
-            render.warning(err, f"Couldn't copy your GitHub CLI logins to {label}. {e}", e.hint)
+            render.warning(err, f"Couldn't copy your {what} to {label}. {e}", e.hint)
             continue
-        note = f"to {label}" + (f", {started}" if started else "")
-        render.success(err, "Copied your GitHub CLI logins", note)
+        notes = (f"to {label}", started, also)
+        render.success(err, f"Copied your {what}", ", ".join(n for n in notes if n))
     if failures:
         raise typer.Exit(1)
+
+
+def _bk_login() -> buildkite.Login:
+    """The token bk is signed in with on this machine. Raises BuildkiteError without one."""
+    try:
+        with err.status(render.working("Asking bk for your token…"), spinner_style=render.ACCENT):
+            return buildkite.login()
+    except KeyboardInterrupt:
+        _cancelled()
+
+
+def _send_bk_token(env: Env, login: buildkite.Login) -> None:
+    """Sign bk in on `env` with your token. Raises ssh.SshError if it doesn't take."""
+    _set_up_ssh(env)
+    doing = f"Signing bk in on {render.names([env])}…"
+    try:
+        with err.status(render.working(doing), spinner_style=render.ACCENT):
+            buildkite.sign_in(env.id, login)
+    except KeyboardInterrupt:
+        _cancelled()
+
+
+def _copy_bk_token_to_new(env: Env) -> None:
+    """Sign bk in on an environment `oo new` just made, with your token from this machine.
+
+    A copy that fails gets a warning rather than keeping you out of a new environment.
+    """
+    try:
+        login = _bk_login()
+    except BuildkiteError as e:
+        render.warning(err, f"No Buildkite CLI token to copy. {e}", detail=e.hint)
+        return
+    try:
+        _send_bk_token(env, login)
+    except ssh.SshError as e:
+        render.warning(err, f"Couldn't copy your Buildkite CLI token. {e}", detail=e.hint)
+        return
+    notes = (f"for {login.org}", login.expiry())
+    render.success(err, "Copied your Buildkite CLI token", ", ".join(n for n in notes if n))
+
+
+@app.command("bk-token")
+def bk_token_(
+    branches: MaybeBranches = None,
+    everything: Annotated[
+        bool, typer.Option("--all", "-a", help="Copy it to every running one.")
+    ] = False,
+) -> None:
+    """Copy your Buildkite CLI token into environments, so bk is signed in there too.
+
+    With no branch, copies to the only running one. Asks bk on this machine for
+    its token each time, so run it again once the one in an environment expires.
+    Starts a stopped environment first.
+    """
+    targets = _copy_targets(branches, everything)
+    if not targets:
+        return
+    try:
+        login = _bk_login()
+    except BuildkiteError as e:
+        _fail(f"No Buildkite CLI token to copy. {e}", hint=e.hint)
+    _copy_to_each(
+        targets, "Buildkite CLI token", lambda env: _send_bk_token(env, login), login.expiry()
+    )
 
 
 def _forget_in_claude(stale: Callable[[str], bool], *, quiet: bool = False) -> None:
@@ -657,6 +742,15 @@ def new(
             "in there too.",
         ),
     ] = False,
+    bk_token: Annotated[
+        bool,
+        typer.Option(
+            "--bk-token/--no-bk-token",
+            envvar=BK_TOKEN_VAR,
+            help="Copy your Buildkite CLI token into it, so bk is signed in there too, "
+            "until the token expires.",
+        ),
+    ] = False,
 ) -> None:
     """Create an environment, then connect to it or open it (see [bold]--then[/])."""
     name = (name or "").strip()
@@ -716,6 +810,8 @@ def new(
         )
     if gh_hosts:
         _copy_gh_hosts_to_new(created)
+    if bk_token:
+        _copy_bk_token_to_new(created)
     render.heading(
         err, "Setting up", created, branch_prefix(), f"created in {render.duration(took)}"
     )

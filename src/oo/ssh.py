@@ -101,6 +101,25 @@ def put_in_home(env_id: str, source: Path, dest: str, timeout: float = 60) -> No
         )
 
 
+def feed(env_id: str, command: str, data: bytes, *, failed: str, timeout: float = 60) -> None:
+    """Run `command` in the environment's shell, with `data` on its stdin.
+
+    For secrets, which this keeps out of every command line on this machine. Raises SshError
+    saying `failed`, with what the command printed to stderr, if it doesn't exit cleanly.
+    """
+    try:
+        done = subprocess.run(
+            [binary("ssh"), "-o", "BatchMode=yes", host(env_id), command],
+            input=data,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise SshError("The environment took too long to answer over SSH.") from None
+    if done.returncode:
+        raise SshError(failed, hint=done.stderr.decode(errors="replace").strip() or None)
+
+
 def replace_with_scp(*args: str) -> NoReturn:
     """Become scp, so it can show its progress and ask for anything it needs."""
     scp = binary("scp")

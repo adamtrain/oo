@@ -6,7 +6,8 @@ import pytest
 from conftest import raw_env
 from typer.testing import CliRunner
 
-from oo import claude, cli, github, ona, ssh
+from oo import buildkite, claude, cli, github, ona, ssh
+from oo.buildkite import BuildkiteError, Login
 from oo.envs import Env
 from oo.github import BranchStatus, GitHubError, PullRequest
 from oo.ona import OnaError
@@ -613,6 +614,160 @@ def test_gh_hosts_carries_on_past_one_that_fails_then_says_so(calls, gh_hosts, m
     assert "Couldn't copy your GitHub CLI logins to sam/feat-10." in result.output
     assert "Broken pipe" in result.output
     assert calls == [("put", "44444444-dddd")]
+
+
+@pytest.fixture
+def bk_token(calls, monkeypatch):
+    """A Buildkite CLI token on this machine, and a fake sign-in that records where it goes."""
+    login = Login("bkua_secret", "acme")
+    monkeypatch.setattr(buildkite, "login", lambda: login)
+    monkeypatch.setattr(
+        buildkite, "sign_in", lambda env_id, login: calls.append(("sign-in", env_id, login.org))
+    )
+    return login
+
+
+def signed_out():
+    raise BuildkiteError("bk has no token to give.", hint="run `bk auth login` to authenticate")
+
+
+def test_new_keeps_your_bk_token_to_itself_unless_asked(calls, bk_token):
+    oo("new")
+    assert calls == [CREATE, PULL, CONNECT]
+
+
+def test_new_copies_your_bk_token_before_connecting(calls, bk_token):
+    result = oo("new", "--bk-token")
+    assert "Copied your Buildkite CLI token for acme" in result.output
+    assert "bkua_secret" not in result.output
+    assert calls == [CREATE, ("sign-in", "99999999-new", "acme"), PULL, CONNECT]
+
+
+def test_new_says_when_the_bk_token_it_copied_expires(calls, bk_token, monkeypatch):
+    monkeypatch.setattr(Login, "expiry", lambda self: "expires in 8h")
+    result = oo("new", "--bk-token")
+    assert "Copied your Buildkite CLI token for acme, expires in 8h" in result.output
+
+
+def test_new_copies_the_bk_token_every_time_once_the_variable_is_set(calls, bk_token, monkeypatch):
+    monkeypatch.setenv("OO_BK_TOKEN", "1")
+    oo("new")
+    assert calls[1][0] == "sign-in"
+
+
+def test_new_can_skip_copying_the_bk_token_for_once(calls, bk_token, monkeypatch):
+    monkeypatch.setenv("OO_BK_TOKEN", "1")
+    oo("new", "--no-bk-token")
+    assert calls == [CREATE, PULL, CONNECT]
+
+
+def test_new_copies_gh_logins_and_the_bk_token_together(calls, gh_hosts, bk_token):
+    oo("new", "--gh-hosts", "--bk-token")
+    assert [c[0] for c in calls[1:3]] == ["put", "sign-in"]
+
+
+def test_new_sets_up_ssh_before_copying_the_bk_token(calls, bk_token, monkeypatch):
+    answers = iter([False, True])
+    monkeypatch.setattr(ssh, "configured", lambda env_id: next(answers))
+    oo("new", "--bk-token")
+    assert [c[:2] for c in calls[1:3]] == [
+        ("environment", "ssh-config"),
+        ("sign-in", "99999999-new"),
+    ]
+
+
+def test_new_connects_anyway_without_a_bk_token_to_copy(calls, bk_token, monkeypatch):
+    monkeypatch.setattr(buildkite, "login", signed_out)
+    result = oo("new", "--bk-token")
+    assert "No Buildkite CLI token to copy. bk has no token to give." in result.output
+    assert "bk auth login" in result.output
+    assert calls == [CREATE, PULL, CONNECT]
+
+
+def test_new_connects_anyway_when_the_bk_token_wont_copy(calls, bk_token, monkeypatch):
+    def sign_in(env_id, login):
+        raise ssh.SshError("bk wouldn't sign in there.", hint="bk isn't installed there.")
+
+    monkeypatch.setattr(buildkite, "sign_in", sign_in)
+    result = oo("new", "--bk-token")
+    assert "Couldn't copy your Buildkite CLI token. bk wouldn't sign in there." in result.output
+    assert "bk isn't installed there." in result.output
+    assert calls == [CREATE, PULL, CONNECT]
+
+
+def test_bk_token_copies_to_the_only_running_one(calls, bk_token):
+    result = oo("bk-token")
+    assert "Copied your Buildkite CLI token to sam/feat-10" in result.output
+    assert "bkua_secret" not in result.output
+    assert calls == [("sign-in", "11111111-aaaa", "acme")]
+
+
+def test_bk_token_says_when_the_token_expires(calls, bk_token, monkeypatch):
+    monkeypatch.setattr(Login, "expiry", lambda self: "expires in 8h")
+    result = oo("bk-token", "docs")
+    assert "to sam/docs, started in 3s, expires in 8h" in result.output
+
+
+def test_bk_token_starts_stopped_ones_you_name(calls, bk_token):
+    oo("bk-token", "docs", "feat-10")
+    assert calls == [
+        ("environment", "start", "33333333-cccc"),
+        ("sign-in", "33333333-cccc", "acme"),
+        ("sign-in", "11111111-aaaa", "acme"),
+    ]
+
+
+def test_bk_token_all_asks_bk_once_for_every_running_one(calls, bk_token, monkeypatch, envs):
+    envs.append(Env.from_json(raw_env("44444444-dddd", "sam/billing", "running")))
+    asked = []
+    monkeypatch.setattr(buildkite, "login", lambda: asked.append(1) or bk_token)
+    result = oo("bk-token", "--all")
+    assert result.exit_code == 0
+    assert asked == [1]
+    assert sorted(c[:2] for c in calls) == [
+        ("sign-in", "11111111-aaaa"),
+        ("sign-in", "44444444-dddd"),
+    ]
+
+
+def test_bk_token_all_says_when_nothing_is_running(calls, bk_token, monkeypatch, envs):
+    del envs[0]
+    monkeypatch.setattr(buildkite, "login", signed_out)
+    result = oo("bk-token", "--all")
+    assert result.exit_code == 0
+    assert "Nothing is running." in result.output
+    assert calls == []
+
+
+def test_bk_token_all_takes_no_branch(calls, bk_token):
+    result = oo("bk-token", "--all", "docs")
+    assert result.exit_code == 1
+    assert calls == []
+
+
+def test_bk_token_needs_a_token_to_copy(calls, bk_token, monkeypatch):
+    monkeypatch.setattr(buildkite, "login", signed_out)
+    result = oo("bk-token", "docs")
+    assert result.exit_code == 1
+    assert "No Buildkite CLI token to copy." in result.output
+    assert "bk auth login" in result.output
+    assert calls == []
+
+
+def test_bk_token_carries_on_past_one_that_fails_then_says_so(calls, bk_token, monkeypatch, envs):
+    envs.append(Env.from_json(raw_env("44444444-dddd", "sam/billing", "running")))
+
+    def sign_in(env_id, login):
+        if env_id == "11111111-aaaa":
+            raise ssh.SshError("bk wouldn't sign in there.", hint="bk isn't installed there.")
+        calls.append(("sign-in", env_id))
+
+    monkeypatch.setattr(buildkite, "sign_in", sign_in)
+    result = oo("bk-token", "--all")
+    assert result.exit_code == 1
+    assert "Couldn't copy your Buildkite CLI token to sam/feat-10." in result.output
+    assert "bk isn't installed there." in result.output
+    assert calls == [("sign-in", "44444444-dddd")]
 
 
 def test_new_refuses_names_ona_wont_take(calls):

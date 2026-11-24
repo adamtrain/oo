@@ -92,3 +92,45 @@ def test_put_in_home_says_what_ssh_said_when_it_fails(ssh_runs, tmp_path):
 def test_put_in_home_says_when_it_cant_read_the_file(ssh_runs, tmp_path):
     with pytest.raises(SshError, match="Couldn't read"):
         ssh.put_in_home("1234", tmp_path / "missing.yml", ".config/gh/hosts.yml")
+
+
+@pytest.fixture
+def fed_runs(monkeypatch):
+    """Fake ssh for feed: a record of each command, along with what it was given on stdin."""
+    runs: list[tuple[list[str], bytes]] = []
+    answer = subprocess.CompletedProcess([], 0, b"", b"")
+
+    def run(args, input, **kwargs):
+        runs.append((args, input))
+        return answer
+
+    monkeypatch.setattr(ssh, "binary", lambda name: name)
+    monkeypatch.setattr(subprocess, "run", run)
+    return runs, answer
+
+
+def test_feed_runs_the_command_with_the_data_on_stdin(fed_runs):
+    runs, _ = fed_runs
+    ssh.feed("1234", "cat >/dev/null", b"secret\n", failed="It didn't work.")
+    assert runs == [
+        (["ssh", "-o", "BatchMode=yes", "1234.ona.environment", "cat >/dev/null"], b"secret\n")
+    ]
+
+
+def test_feed_says_what_you_told_it_to_with_what_the_command_said(fed_runs):
+    _, answer = fed_runs
+    answer.returncode, answer.stderr = 127, b"bk isn't installed there.\n"
+    with pytest.raises(SshError) as raised:
+        ssh.feed("1234", "bk", b"secret\n", failed="It didn't work.")
+    assert str(raised.value) == "It didn't work."
+    assert raised.value.hint == "bk isn't installed there."
+
+
+def test_feed_gives_up_on_an_environment_that_hangs(fed_runs, monkeypatch):
+    def run(args, input, **kwargs):
+        raise subprocess.TimeoutExpired(args, 60)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SshError, match="too long") as raised:
+        ssh.feed("1234", "bk", b"secret\n", failed="It didn't work.")
+    assert raised.value.__cause__ is None

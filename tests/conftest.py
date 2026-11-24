@@ -43,7 +43,14 @@ def raw_env(
 
 @pytest.fixture(autouse=True)
 def _clean_environment(monkeypatch):
-    for var in ("OO_BRANCH_PREFIX", "OO_EDITOR", "OO_PROJECT", "OO_CLASS", "OO_GH_HOSTS"):
+    for var in (
+        "OO_BRANCH_PREFIX",
+        "OO_EDITOR",
+        "OO_PROJECT",
+        "OO_CLASS",
+        "OO_GH_HOSTS",
+        "OO_BK_TOKEN",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
