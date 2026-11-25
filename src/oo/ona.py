@@ -118,6 +118,23 @@ def quietly(
     return time.monotonic() - started, output or ""
 
 
+def run(*args: str) -> int:
+    """Run an ona command that prints straight to the terminal, and return its exit code.
+
+    It gets no stdin, so one of several in a row can't swallow input meant for the rest.
+    """
+    binary = _binary()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    process = subprocess.Popen([binary, *args], stdin=subprocess.DEVNULL)
+    try:
+        return process.wait()
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+
+
 def replace_with(*args: str) -> NoReturn:
     """Become an ona command, so SSH gets the terminal all to itself."""
     binary = _binary()

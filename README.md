@@ -77,6 +77,7 @@ oo                            # list your environments
 oo c login-fix                # SSH into the one on adam/login-fix, starting it if needed
 oo c                          # …the only running one, or pick from a list
 oo c login -- git status      # run one command instead of opening a shell
+oo c --all -- git status      # …in every running one, one after another
 oo open login -e cursor       # open it in Cursor (or set $OO_EDITOR)
 oo claude login               # open a Claude Code session on it in the Claude desktop app
 oo claude login --label Login # …and call it Login in the app's SSH picker
@@ -118,6 +119,20 @@ them and stops instead.
 When you have more than one environment on the same branch, lists also show when each was
 created and the last 6 characters of its ID. Type those characters to name one directly, like
 `oo c 0ffee1`.
+
+### Running a command everywhere
+
+`oo c --all` runs a command in every running environment, one after another, and shows what each
+one prints as it goes:
+
+```sh
+oo c --all -- uv tool install ruff
+```
+
+Stopped environments stay stopped. The command runs over SSH as it does with `oo c login --`, so
+it starts in the same folder and sees the same `PATH`. It gets no input, so it can't stop to ask
+you anything. If it fails somewhere, oo says where, carries on with the rest, and exits with an
+error at the end.
 
 ### Copying files
 

@@ -258,6 +258,7 @@ EPILOG = (
     "  [cyan]oo c login-fix[/]               SSH into the one on adam/login-fix\n"
     "  [cyan]oo c[/]                         …the only running one, or pick from a list\n"
     "  [cyan]oo c login -- git status[/]     run a command instead of a shell\n"
+    "  [cyan]oo c --all -- git status[/]     …in every running one\n"
     "  [cyan]oo open login -e cursor[/]      open it in Cursor\n"
     "  [cyan]oo claude login[/]              open it in the Claude desktop app\n"
     "  [cyan]oo cp notes.md login:[/]        copy a file into its repo\n"
@@ -314,11 +315,62 @@ def connect(
             help="A command to run instead of a shell, after [bold]--[/].", show_default=False
         ),
     ] = None,
+    everything: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            "-a",
+            help="Run the command in every running one, one after another, instead of naming one.",
+        ),
+    ] = False,
 ) -> None:
-    """SSH into an environment, starting it first if it's stopped."""
+    """SSH into an environment, starting it first if it's stopped.
+
+    With [bold]--all[/] and a command, runs it in every running one instead.
+    """
+    if everything:
+        # --all names the environments, so what would have been the branch starts the command.
+        _run_in_each([*([branch] if branch else []), *(command or [])])
+        return
     env = _choose(_load(), branch, "connect to")
     render.heading(err, "Connecting to", env, branch_prefix(), _start_if_stopped(env))
     ona.replace_with("environment", "ssh", env.id, *(["--", *command] if command else []))
+
+
+def _run_in_each(command: list[str]) -> None:
+    """Run `command` over SSH in every running environment, one after another, showing its output.
+
+    One it fails in gets a warning, the rest still run it, and oo exits with an error at the end.
+    """
+    if not command:
+        _fail(
+            "--all runs a command in every running environment, so it needs one.",
+            hint="Like [bold]oo c --all -- git status[/].",
+        )
+    targets = [e for e in _load() if e.running]
+    if not targets:
+        render.success(err, "Nothing is running.")
+        return
+    prefix = branch_prefix()
+    failed = []
+    for i, env in enumerate(targets, 1):
+        render.heading(err, "Running in", env, prefix, f"{i} of {len(targets)}")
+        started = time.monotonic()
+        try:
+            code = ona.run("environment", "ssh", env.id, "--", *command)
+        except OnaError as e:
+            _fail(str(e), detail=e.detail, hint=e.hint)
+        except KeyboardInterrupt:
+            _cancelled()
+        label = render.names([env])
+        if code:
+            failed.append(env)
+            render.warning(err, f"It exited with {code} in {label}.")
+        else:
+            took = render.duration(time.monotonic() - started)
+            render.success(err, f"Ran it in {label}", f"in {took}")
+    if failed:
+        _fail(f"It failed in {render.names(failed)}.")
 
 
 @app.command("open")

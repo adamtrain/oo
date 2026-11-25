@@ -65,6 +65,7 @@ def calls(monkeypatch, envs):
     monkeypatch.setattr(ona, "list_classes", lambda: [TOKYO, FRANKFURT])
     monkeypatch.setattr(ona, "replace_with", replace_with)
     monkeypatch.setattr(ona, "quietly", quietly)
+    monkeypatch.setattr(ona, "run", lambda *args: record.append(args) or 0)
     monkeypatch.setattr(github, "lookup", lambda envs: {})
     monkeypatch.setattr(ssh, "configured", lambda env_id: True)
     monkeypatch.setattr(ssh, "replace_with_scp", lambda *args: replace_with("scp", *args))
@@ -119,6 +120,54 @@ def test_connects_by_short_branch(calls):
 def test_passes_a_remote_command_through(calls):
     oo("c", "feat-10", "--", "git", "status", "-sb")
     assert calls == [("environment", "ssh", "11111111-aaaa", "--", "git", "status", "-sb")]
+
+
+def test_all_runs_a_command_in_every_running_one_and_no_others(calls, envs):
+    envs.append(Env.from_json(raw_env("44444444-dddd", "sam/billing", "running")))
+    result = oo("c", "--all", "--", "uv", "tool", "install", "ruff")
+    assert result.exit_code == 0
+    assert "Running in sam/feat-10 · 1 of 2" in result.output
+    assert "Ran it in sam/billing" in result.output
+    assert calls == [
+        ("environment", "ssh", "11111111-aaaa", "--", "uv", "tool", "install", "ruff"),
+        ("environment", "ssh", "44444444-dddd", "--", "uv", "tool", "install", "ruff"),
+    ]
+
+
+def test_all_passes_a_one_word_command_through(calls):
+    oo("c", "-a", "--", "pwd")
+    assert calls == [("environment", "ssh", "11111111-aaaa", "--", "pwd")]
+
+
+def test_all_carries_on_past_one_that_fails_then_says_so(calls, monkeypatch, envs):
+    envs.append(Env.from_json(raw_env("44444444-dddd", "sam/billing", "running")))
+
+    def run(*args):
+        calls.append(args)
+        return 127 if args[2] == "11111111-aaaa" else 0
+
+    monkeypatch.setattr(ona, "run", run)
+    result = oo("c", "--all", "--", "nope")
+    assert result.exit_code == 1
+    assert "It exited with 127 in sam/feat-10." in result.output
+    assert "Ran it in sam/billing" in result.output
+    assert "✗ It failed in sam/feat-10." in result.output
+    assert [c[2] for c in calls] == ["11111111-aaaa", "44444444-dddd"]
+
+
+def test_all_says_when_nothing_is_running(calls, envs):
+    del envs[0]
+    result = oo("c", "--all", "--", "pwd")
+    assert result.exit_code == 0
+    assert "Nothing is running." in result.output
+    assert calls == []
+
+
+def test_all_needs_a_command(calls):
+    result = oo("c", "--all")
+    assert result.exit_code == 1
+    assert "it needs one" in result.output
+    assert calls == []
 
 
 def test_starts_a_stopped_one_quietly_before_connecting(calls):
